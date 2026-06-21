@@ -1,26 +1,333 @@
 @import "tailwindcss";
 
+/* ───────────────────────────────────────────────────────────────
+   TrustGuard — Phase 2B.5 Enterprise Visual System
+   Warm enterprise charcoal with restrained amber accent.
+   Replaces the earlier neon cyan / violet / magenta palette.
+   ─────────────────────────────────────────────────────────────── */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surfaces */
+  --bg-0: #0D0C0A;            /* app background */
+  --bg-1: #151310;            /* main surface */
+  --bg-2: #1D1A16;            /* elevated surface */
+  --bg-3: #221F1A;            /* card surface */
+
+  /* Type */
+  --ink-0: #F4EFE7;           /* primary text */
+  --ink-1: #B8B0A3;           /* secondary text */
+  --ink-2: #7F776B;           /* muted text */
+
+  /* Accent (warm amber) */
+  --accent: #F59E2E;
+  --accent-hover: #FFB454;
+  --accent-soft: rgba(245, 158, 46, 0.12);
+  --accent-strong: rgba(245, 158, 46, 0.32);
+
+  /* Orchestrator (calm slate, intentionally cool to differentiate from Guardian) */
+  --slate: #8FA1B3;
+  --slate-soft: rgba(143, 161, 179, 0.10);
+  --slate-border: rgba(143, 161, 179, 0.28);
+
+  /* Borders */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(245, 158, 46, 0.32);
+  --border-warm: rgba(180, 150, 110, 0.18);
+
+  /* Decision palette (muted, not neon) */
+  --d-allow: #6FB089;             /* muted green */
+  --d-conditions: #F59E2E;        /* warm amber */
+  --d-restrict: #9B89B8;          /* muted violet */
+  --d-escalate: #D97448;          /* burnt orange */
+  --d-block: #B83A3A;             /* deep red */
+
+  /* Risk palette (calmer) */
+  --risk-low: #6FB089;
+  --risk-moderate: #C9A36B;
+  --risk-elevated: #F59E2E;
+  --risk-high: #D97448;
+  --risk-critical: #B83A3A;
+
+  /* Status (warm-shifted) */
+  --status-info: #8FA1B3;
+
+  /* Legacy aliases kept so any stray reference still resolves to a warm value */
+  --cyan: #C9A36B;
+  --cyan-2: #C9A36B;
+  --violet: #9B89B8;
+  --magenta: #D97448;
+  --green: var(--d-allow);
+  --amber: var(--accent);
+  --red: var(--d-block);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg-0);
+  --color-foreground: var(--ink-0);
+  --font-sans:
+    "Inter", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto,
+    "Helvetica Neue", Arial;
+  --font-serif:
+    "Source Serif 4", "Source Serif Pro", Georgia, "Times New Roman", serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html, body {
+  background:
+    radial-gradient(900px 500px at 85% -10%, rgba(245, 158, 46, 0.06), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(245, 158, 46, 0.04), transparent 60%),
+    linear-gradient(180deg, #0D0C0A 0%, #100E0B 60%, #0B0A08 100%);
+  color: var(--ink-0);
+  min-height: 100%;
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  letter-spacing: -0.005em;
+  -webkit-font-smoothing: antialiased;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* ───────── Cards / surfaces ───────── */
+
+.glass {
+  background: linear-gradient(180deg, rgba(34, 31, 26, 0.78), rgba(21, 19, 16, 0.82));
+  backdrop-filter: blur(10px) saturate(110%);
+  -webkit-backdrop-filter: blur(10px) saturate(110%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 0 rgba(0, 0, 0, 0.4),
+    0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.glass-strong {
+  background:
+    linear-gradient(180deg, rgba(40, 36, 30, 0.85), rgba(24, 22, 19, 0.9));
+  backdrop-filter: blur(14px) saturate(120%);
+  border: 1px solid var(--border-warm);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 48px rgba(0, 0, 0, 0.5);
+}
+
+.surface {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.surface-elevated {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+/* ───────── Pills / chips ───────── */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--ink-1);
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.pill-accent {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  color: var(--ink-1);
+}
+
+/* ───────── Glow helpers (restrained) ───────── */
+
+/* Kept as aliases so existing callers compose cleanly with the new palette. */
+.glow-cyan {
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 46, 0.22),
+    0 0 16px rgba(245, 158, 46, 0.14);
+}
+.glow-violet {
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 46, 0.28),
+    0 0 18px rgba(245, 158, 46, 0.16);
+}
+.glow-magenta {
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 46, 0.32),
+    0 0 22px rgba(245, 158, 46, 0.18);
+}
+.glow-amber {
+  box-shadow:
+    0 0 0 1px rgba(245, 158, 46, 0.32),
+    0 0 22px rgba(245, 158, 46, 0.18);
+}
+
+/* ───────── Buttons ───────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--ink-1);
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.btn:hover {
+  border-color: var(--border-warm);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink-0);
+}
+
+.btn-primary {
+  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.btn-primary:hover {
+  background: rgba(245, 158, 46, 0.18);
+  color: var(--accent-hover);
+  border-color: var(--accent);
+}
+
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-1);
+}
+.btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--ink-0);
+}
+
+/* ───────── Inputs ───────── */
+
+.input,
+input[type="text"],
+input[type="number"],
+input[type="password"],
+input[type="email"],
+input[type="search"],
+select,
+textarea {
+  width: 100%;
+  background: rgba(13, 12, 10, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 11px;
+  font-size: 13px;
+  color: var(--ink-0);
+  transition: border-color 0.15s ease;
+}
+.input:focus,
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* ───────── Typography helpers ───────── */
+
+.grad-text {
+  background: linear-gradient(90deg, #F4EFE7 0%, #F59E2E 60%, #FFB454 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.section-title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.section-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-0);
+  letter-spacing: -0.01em;
+}
+
+.divider {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(245, 158, 46, 0.20),
+    transparent
+  );
+}
+
+/* ───────── Status dots ───────── */
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.dot-pass {
+  background: var(--d-allow);
+  box-shadow: 0 0 6px rgba(111, 176, 137, 0.5);
+}
+.dot-warn {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(245, 158, 46, 0.5);
+}
+.dot-fail {
+  background: var(--d-block);
+  box-shadow: 0 0 6px rgba(184, 58, 58, 0.5);
+}
+
+/* ───────── Scrollbars ───────── */
+
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(245, 158, 46, 0.18);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(245, 158, 46, 0.28);
+}
+*::-webkit-scrollbar-track { background: transparent; }
+
+button { cursor: pointer; }
+input, select { color: var(--ink-0); }
+
+/* ───────── Walkthrough section highlight (warm) ───────── */
+
+.walkthrough-highlight {
+  animation: tg-highlight 2.4s ease-out;
+  border-radius: 16px;
+}
+@keyframes tg-highlight {
+  0%   { box-shadow: 0 0 0 0 rgba(245, 158, 46, 0.0); }
+  20%  { box-shadow: 0 0 0 3px rgba(245, 158, 46, 0.5), 0 0 56px rgba(245, 158, 46, 0.35); }
+  100% { box-shadow: 0 0 0 0 rgba(245, 158, 46, 0.0); }
 }
