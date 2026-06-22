@@ -2,7 +2,14 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PROVIDERS, findProvider, type ProviderErrorType } from "@/lib/modelProviders";
+import {
+  PROVIDERS,
+  findProvider,
+  friendlyErrorMessage,
+  type ProviderErrorType,
+  type ModelListEntry,
+  type ModelListResponse,
+} from "@/lib/modelProviders";
 import type { AIProvider, BYOKConfig } from "@/lib/types";
 
 /**
@@ -12,11 +19,11 @@ import type { AIProvider, BYOKConfig } from "@/lib/types";
 export type ByokStatus =
   | { kind: "demo" }
   | { kind: "ready" }
+  | { kind: "loading_models" }
+  | { kind: "models_loaded" }
   | { kind: "testing" }
   | { kind: "connected" }
   | { kind: "error"; errorType: ProviderErrorType };
-
-const CUSTOM_PRESET_ID = "__custom__";
 
 export default function BYOKControl({
   byok,
@@ -46,8 +53,23 @@ export default function BYOKControl({
     width: 480,
   });
 
+  // Model-list loading is local to this control.
+  const [loadedModels, setLoadedModels] = useState<ModelListEntry[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [loadError, setLoadError] = useState<string | undefined>();
+  const [loadErrorDetail, setLoadErrorDetail] = useState<string | undefined>();
+  const [showLoadDetail, setShowLoadDetail] = useState(false);
+
   // eslint-disable-next-line react-hooks/set-state-in-effect -- mount flag for portal SSR-safety
   useEffect(() => setMounted(true), []);
+
+  // Clear loaded model list when provider or key changes — list is per-(provider, key).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional reset on provider/key change
+    setLoadedModels([]);
+    setLoadError(undefined);
+    setLoadErrorDetail(undefined);
+  }, [byok.provider, byok.apiKey]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -62,7 +84,7 @@ export default function BYOKControl({
       if (left < 12) left = 12;
       if (left + width > vw - 12) left = Math.max(12, vw - width - 12);
       let top = r.bottom + 8;
-      const estimatedHeight = Math.min(680, vh - 48);
+      const estimatedHeight = Math.min(720, vh - 48);
       if (top + estimatedHeight > vh - 12) {
         const aboveTop = r.top - 8 - estimatedHeight;
         if (aboveTop >= 12) top = aboveTop;
@@ -101,10 +123,52 @@ export default function BYOKControl({
   const provider = findProvider(byok.provider);
   const presets = provider?.presets ?? [];
   const isAzure = byok.provider === "azure_openai";
-  const matchedPreset = presets.find((p) => p.id === byok.modelName);
-  const presetValue = matchedPreset?.id ?? CUSTOM_PRESET_ID;
 
-  const pill = statusPill(status);
+  // Effective status for the pill: prefer local load state when active so
+  // user sees "Loading Models" / "Models Loaded" feedback even before testing.
+  const effectiveStatus: ByokStatus = useMemo(() => {
+    if (byok.mode !== "demo") {
+      if (loadingModels) return { kind: "loading_models" };
+      if (loadedModels.length > 0 && status.kind !== "connected" && status.kind !== "error" && status.kind !== "testing") {
+        return { kind: "models_loaded" };
+      }
+    }
+    return status;
+  }, [byok.mode, loadingModels, loadedModels.length, status]);
+
+  const pill = statusPill(effectiveStatus);
+
+  async function loadModels() {
+    if (byok.mode === "demo") return;
+    if (!provider?.supportsModelListing) return;
+    setLoadingModels(true);
+    setLoadError(undefined);
+    setLoadErrorDetail(undefined);
+    try {
+      const res = await fetch("/api/ai/models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: byok.provider, apiKey: byok.apiKey }),
+      });
+      const j = (await res.json()) as ModelListResponse & { technicalDetail?: string };
+      if (j.ok && j.models && j.models.length > 0) {
+        setLoadedModels(j.models);
+      } else if (j.ok && (!j.models || j.models.length === 0)) {
+        setLoadedModels([]);
+        setLoadError(`No models returned by ${provider.displayName}. Enter a model ID manually.`);
+      } else {
+        setLoadedModels([]);
+        setLoadError(j.message ?? friendlyErrorMessage(j.errorType ?? "unknown_error", byok.provider));
+        setLoadErrorDetail(j.technicalDetail);
+      }
+    } catch (e) {
+      setLoadedModels([]);
+      setLoadError(friendlyErrorMessage("network_error", byok.provider));
+      setLoadErrorDetail(e instanceof Error ? e.message : undefined);
+    } finally {
+      setLoadingModels(false);
+    }
+  }
 
   return (
     <>
@@ -185,8 +249,11 @@ export default function BYOKControl({
                     setByok({
                       ...byok,
                       provider: newProvider,
+                      // Custom-first: only seed modelName from defaultPresetId
+                      // when the provider actually has a non-empty default
+                      // (OpenAI / Mistral / OpenRouter). Anthropic and Azure
+                      // start empty so the user must load or paste a model.
                       modelName: meta?.defaultPresetId || "",
-                      // Reset Azure fields when switching away from Azure.
                       azureEndpoint:
                         newProvider === "azure_openai" ? byok.azureEndpoint : undefined,
                       azureDeployment:
@@ -218,43 +285,157 @@ export default function BYOKControl({
                 )}
               </Field>
 
-              {/* Non-Azure providers: preset dropdown + custom model field */}
+              <Field label="API Key" className="col-span-2">
+                <input
+                  disabled={byok.mode === "demo"}
+                  value={byok.apiKey}
+                  onChange={(e) => setByok({ ...byok, apiKey: e.target.value })}
+                  className="input"
+                  type="password"
+                  placeholder="held only in this browser tab · never persisted or logged"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+              </Field>
+
+              {/* Non-Azure providers: custom-first model field + Load models + Examples */}
               {!isAzure && (
                 <>
-                  <Field label="Model preset">
-                    <select
-                      disabled={byok.mode === "demo"}
-                      value={presetValue}
-                      onChange={(e) => {
-                        const v = e.target.value;
-                        if (v === CUSTOM_PRESET_ID) {
-                          // Switching to custom — clear so user types.
-                          setByok({ ...byok, modelName: "" });
-                        } else {
-                          setByok({ ...byok, modelName: v });
-                        }
-                      }}
-                      className="input"
+                  <Field
+                    label={
+                      provider?.supportsModelListing
+                        ? "Model / deployment ID  (custom-first)"
+                        : "Model / deployment ID"
+                    }
+                    className="col-span-2"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        disabled={byok.mode === "demo"}
+                        value={byok.modelName}
+                        onChange={(e) => setByok({ ...byok, modelName: e.target.value })}
+                        className="input flex-1"
+                        placeholder={provider?.modelPlaceholder ?? "model id"}
+                        spellCheck={false}
+                      />
+                      {provider?.supportsModelListing && (
+                        <button
+                          type="button"
+                          onClick={loadModels}
+                          disabled={byok.mode === "demo" || loadingModels || !byok.apiKey}
+                          className="px-3 py-2 rounded-lg border text-xs whitespace-nowrap disabled:opacity-40"
+                          style={{
+                            borderColor: "rgba(155, 137, 184, 0.5)",
+                            background: "rgba(155, 137, 184, 0.10)",
+                            color: "#F4EFE7",
+                          }}
+                          title={
+                            !byok.apiKey
+                              ? "Enter an API key first"
+                              : `Fetch models available to your ${provider.displayName} account`
+                          }
+                        >
+                          {loadingModels ? "Loading…" : "Load available models"}
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-[var(--ink-2)] mt-1 leading-snug">
+                      Model availability varies by account, region, and platform. Use{" "}
+                      <span className="text-[var(--ink-1)]">Load available models</span> or paste a
+                      model ID from your provider console.
+                    </div>
+                  </Field>
+
+                  {/* Loaded models (only when we have some) */}
+                  {loadedModels.length > 0 && (
+                    <Field
+                      label={`Available models  (${loadedModels.length})`}
+                      className="col-span-2"
                     >
-                      {presets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.label}
-                          {p.hint ? ` — ${p.hint}` : ""}
-                        </option>
-                      ))}
-                      <option value={CUSTOM_PRESET_ID}>Custom…</option>
-                    </select>
-                  </Field>
-                  <Field label="Custom model ID">
-                    <input
-                      disabled={byok.mode === "demo"}
-                      value={byok.modelName}
-                      onChange={(e) => setByok({ ...byok, modelName: e.target.value })}
-                      className="input"
-                      placeholder="enter model id available in your account"
-                      spellCheck={false}
-                    />
-                  </Field>
+                      <select
+                        disabled={byok.mode === "demo"}
+                        value={
+                          loadedModels.some((m) => m.id === byok.modelName)
+                            ? byok.modelName
+                            : ""
+                        }
+                        onChange={(e) => {
+                          if (e.target.value) setByok({ ...byok, modelName: e.target.value });
+                        }}
+                        className="input"
+                      >
+                        <option value="">— select a model from your account —</option>
+                        {loadedModels.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.displayName ? `${m.displayName}  (${m.id})` : m.id}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  )}
+
+                  {/* Load error surface */}
+                  {loadError && (
+                    <div
+                      className="col-span-2 p-2 rounded-lg border text-[11px] leading-snug"
+                      style={{
+                        borderColor: "rgba(217, 116, 72, 0.35)",
+                        background: "rgba(217, 116, 72, 0.06)",
+                        color: "#F4EFE7",
+                      }}
+                    >
+                      <div style={{ color: "#FFB454" }}>⚠ {loadError}</div>
+                      <div className="text-[var(--ink-2)] mt-0.5">
+                        You can still enter a model ID manually above.
+                      </div>
+                      {loadErrorDetail && (
+                        <details
+                          className="mt-1"
+                          open={showLoadDetail}
+                          onToggle={(e) =>
+                            setShowLoadDetail((e.target as HTMLDetailsElement).open)
+                          }
+                        >
+                          <summary className="cursor-pointer text-[var(--ink-2)] select-none">
+                            Technical details
+                          </summary>
+                          <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-[var(--ink-2)] max-h-32 overflow-y-auto">
+                            {loadErrorDetail}
+                          </pre>
+                        </details>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Examples — always suggestions only */}
+                  {presets.length > 0 && (
+                    <Field
+                      label="Examples  (not guaranteed available)"
+                      className="col-span-2"
+                    >
+                      <select
+                        disabled={byok.mode === "demo"}
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value)
+                            setByok({ ...byok, modelName: e.target.value });
+                        }}
+                        className="input"
+                      >
+                        <option value="">— copy an example into the field above —</option>
+                        {presets.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.label}
+                            {p.hint ? ` — ${p.hint}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="text-[11px] text-[var(--ink-2)] mt-1">
+                        Examples may not be available to every account. Prefer Load
+                        available models when supported.
+                      </div>
+                    </Field>
+                  )}
                 </>
               )}
 
@@ -285,7 +466,7 @@ export default function BYOKControl({
                         })
                       }
                       className="input"
-                      placeholder="your deployment name (not raw model name)"
+                      placeholder="your deployment name (not raw model ID)"
                       spellCheck={false}
                     />
                   </Field>
@@ -301,21 +482,20 @@ export default function BYOKControl({
                       spellCheck={false}
                     />
                   </Field>
+                  <div
+                    className="col-span-2 p-2 rounded-lg border text-[11px] leading-snug"
+                    style={{
+                      borderColor: "rgba(155, 137, 184, 0.35)",
+                      background: "rgba(155, 137, 184, 0.06)",
+                      color: "#F4EFE7",
+                    }}
+                  >
+                    Azure OpenAI uses <span className="text-[var(--ink-1)]">deployment names</span>{" "}
+                    from your Azure OpenAI resource. There is no public model list — enter the
+                    deployment name exactly as it appears in your Azure portal.
+                  </div>
                 </>
               )}
-
-              <Field label="API Key" className="col-span-2">
-                <input
-                  disabled={byok.mode === "demo"}
-                  value={byok.apiKey}
-                  onChange={(e) => setByok({ ...byok, apiKey: e.target.value })}
-                  className="input"
-                  type="password"
-                  placeholder="held only in this browser tab · never persisted or logged"
-                  spellCheck={false}
-                  autoComplete="off"
-                />
-              </Field>
             </div>
 
             <div className="mt-3">
@@ -363,6 +543,13 @@ export default function BYOKControl({
                   "linear-gradient(90deg, rgba(245, 158, 46, 0.18), rgba(201, 163, 107, 0.18))",
                 color: "#F4EFE7",
               }}
+              title={
+                !byok.apiKey
+                  ? "Enter an API key first"
+                  : !byok.modelName
+                    ? "Enter a model / deployment ID first"
+                    : "Run a small test call to validate"
+              }
             >
               {testing
                 ? "Calling provider…"
@@ -451,6 +638,22 @@ function statusPill(status: ByokStatus) {
       border: "rgba(245, 158, 46, 0.55)",
     };
   }
+  if (status.kind === "loading_models") {
+    return {
+      label: "Loading Models",
+      fg: "#F4EFE7",
+      bg: "rgba(155, 137, 184, 0.18)",
+      border: "rgba(155, 137, 184, 0.55)",
+    };
+  }
+  if (status.kind === "models_loaded") {
+    return {
+      label: "Models Loaded",
+      fg: "#F4EFE7",
+      bg: "rgba(155, 137, 184, 0.16)",
+      border: "rgba(155, 137, 184, 0.55)",
+    };
+  }
   if (status.kind === "ready") {
     return {
       label: "BYOK Ready",
@@ -460,7 +663,12 @@ function statusPill(status: ByokStatus) {
     };
   }
   if (status.kind === "error") {
-    return { label: errorPillLabel(status.errorType), fg: "#FFB454", bg: "rgba(217,116,72,0.14)", border: "rgba(217,116,72,0.55)" };
+    return {
+      label: errorPillLabel(status.errorType),
+      fg: "#FFB454",
+      bg: "rgba(217,116,72,0.14)",
+      border: "rgba(217,116,72,0.55)",
+    };
   }
   return {
     label: "Demo Mode Active",
@@ -473,9 +681,13 @@ function statusPill(status: ByokStatus) {
 function errorPillLabel(t: ProviderErrorType): string {
   switch (t) {
     case "model_not_found":
-      return "Model Not Found · Falling Back";
+      return "Model Not Available · Falling Back";
     case "invalid_api_key":
-      return "Invalid API Key · Falling Back";
+      return "Invalid Key · Falling Back";
+    case "permission_denied":
+      return "Access Denied · Falling Back";
+    case "region_unavailable":
+      return "Region Unavailable · Falling Back";
     case "rate_limited":
       return "Rate Limited · Falling Back";
     case "provider_unavailable":
@@ -553,7 +765,6 @@ function TaskCheck({
   disabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
-  // useMemo to silence "unused import" if React tree-shaking changes; harmless otherwise.
   const id = useMemo(() => `tc-${label.replace(/\s+/g, "-").toLowerCase()}`, [label]);
   return (
     <label

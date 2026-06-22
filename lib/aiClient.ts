@@ -150,16 +150,23 @@ function classifyHttpError(status: number, body: string): ProviderError {
   const lower = body.toLowerCase();
   if (
     status === 404 ||
-    lower.includes("model") &&
+    (lower.includes("model") &&
       (lower.includes("not_found") ||
         lower.includes("not found") ||
         lower.includes("does not exist") ||
-        lower.includes("no such model"))
+        lower.includes("no such model")))
   ) {
     return new ProviderError("model_not_found", "Model not found.", body);
   }
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return new ProviderError("invalid_api_key", "Invalid API key.", body);
+  }
+  if (status === 403) {
+    // 403 commonly means "valid key, no access to this model/region".
+    if (lower.includes("region") || lower.includes("not available in")) {
+      return new ProviderError("region_unavailable", "Model not available in this region.", body);
+    }
+    return new ProviderError("permission_denied", "Permission denied for this model.", body);
   }
   if (status === 429) {
     return new ProviderError("rate_limited", "Rate limited by provider.", body);
@@ -172,6 +179,10 @@ function classifyHttpError(status: number, body: string): ProviderError {
     );
   }
   if (status === 400 || status === 422) {
+    // Some providers return 400 for model-not-found instead of 404.
+    if (lower.includes("model")) {
+      return new ProviderError("model_not_found", "Model not found.", body);
+    }
     return new ProviderError(
       "malformed_request",
       "Provider rejected the request.",
@@ -191,4 +202,104 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return "";
   }
+}
+
+/* ------------------------------------------------------------------------- */
+/*  Model listing                                                            */
+/* ------------------------------------------------------------------------- */
+
+export interface ListModelsParams {
+  provider: AIProvider;
+  apiKey?: string;
+}
+
+export interface ListedModel {
+  id: string;
+  displayName?: string;
+}
+
+/**
+ * Fetch the list of models available to the user for a provider.
+ * Throws ProviderError with a normalized errorType on failure.
+ * Never logs or returns the API key.
+ */
+export async function listModels(p: ListModelsParams): Promise<ListedModel[]> {
+  switch (p.provider) {
+    case "openai":
+      return listFromOpenAICompat("https://api.openai.com/v1/models", p.apiKey, "Bearer");
+    case "mistral":
+      return listFromOpenAICompat("https://api.mistral.ai/v1/models", p.apiKey, "Bearer");
+    case "openrouter":
+      // OpenRouter models endpoint is publicly listable; pass key if present.
+      return listFromOpenAICompat("https://openrouter.ai/api/v1/models", p.apiKey, "Bearer");
+    case "anthropic":
+      return listAnthropic(p.apiKey);
+    case "azure_openai":
+      // Listing Azure deployments requires Azure ARM management permissions.
+      // We don't implement that — return a malformed_request so the caller
+      // can render the "enter deployment name" guidance.
+      throw new ProviderError(
+        "malformed_request",
+        "Azure OpenAI uses deployment names. Enter the deployment name from your Azure OpenAI resource.",
+      );
+  }
+}
+
+async function listFromOpenAICompat(
+  url: string,
+  apiKey: string | undefined,
+  scheme: "Bearer",
+): Promise<ListedModel[]> {
+  let res: Response;
+  try {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (apiKey) headers["Authorization"] = `${scheme} ${apiKey}`;
+    res = await fetch(url, { method: "GET", headers });
+  } catch (e) {
+    throw new ProviderError("network_error", networkMessage(e));
+  }
+  if (!res.ok) {
+    const body = await safeText(res);
+    throw classifyHttpError(res.status, body);
+  }
+  const j = (await res.json().catch(() => null)) as
+    | { data?: Array<{ id?: string; name?: string }> }
+    | null;
+  const data = j?.data ?? [];
+  return data
+    .map((m) => ({ id: String(m?.id ?? "").trim(), displayName: m?.name }))
+    .filter((m) => m.id.length > 0);
+}
+
+async function listAnthropic(apiKey: string | undefined): Promise<ListedModel[]> {
+  if (!apiKey) {
+    throw new ProviderError(
+      "invalid_api_key",
+      "Anthropic model listing requires an API key.",
+    );
+  }
+  let res: Response;
+  try {
+    res = await fetch("https://api.anthropic.com/v1/models", {
+      method: "GET",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        Accept: "application/json",
+      },
+    });
+  } catch (e) {
+    throw new ProviderError("network_error", networkMessage(e));
+  }
+  if (!res.ok) {
+    const body = await safeText(res);
+    throw classifyHttpError(res.status, body);
+  }
+  const j = (await res.json().catch(() => null)) as
+    | { data?: Array<{ id?: string; display_name?: string }> }
+    | null;
+  const data = j?.data ?? [];
+  return data
+    .map((m) => ({ id: String(m?.id ?? "").trim(), displayName: m?.display_name }))
+    .filter((m) => m.id.length > 0);
 }

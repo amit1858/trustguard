@@ -195,10 +195,11 @@ Supported providers:
 ### Module layout
 
 ```
-lib/modelProviders.ts   # provider registry (presets, defaults, error helpers)
+lib/modelProviders.ts   # provider registry (examples + supportsModelListing + custom-first)
 lib/promptTemplates.ts  # SYSTEM_PROMPT + buildPrompt(task, scenario, guardian)
-lib/aiClient.ts         # provider adapters with normalized ProviderError classification
-app/api/ai/route.ts     # POST /api/ai → AIRouteResponse common shape
+lib/aiClient.ts         # provider adapters + listModels() + normalized ProviderError
+app/api/ai/route.ts        # POST /api/ai → AIRouteResponse common shape
+app/api/ai/models/route.ts # POST /api/ai/models → ModelListResponse common shape
 ```
 
 The API route accepts `{ provider, apiKey, modelName, task, prompt, azureEndpoint?, azureDeployment?, azureApiVersion? }` and returns a normalized `AIRouteResponse`:
@@ -217,16 +218,22 @@ The API route accepts `{ provider, apiKey, modelName, task, prompt, azureEndpoin
 
 BYOK is optional. The app works fully without API keys — deterministic Guardian decisions render the same explanation copy in either mode.
 
+**Custom-first model selection.** Provider model availability changes over time and varies by account, region, and platform. Hardcoded model defaults go stale (a model that worked last quarter can return 404 today). TrustGuard treats model presets as **examples only** and never forces them as the only path. The recommended user flow is:
+
+1. **Load available models** — for providers that expose a list endpoint (OpenAI, Anthropic, Mistral, OpenRouter), click "Load available models" in the BYOK popover to fetch the models your API key can actually use, then pick one from the dropdown.
+2. **Or enter a custom model ID** — paste any model / deployment ID from your provider console. The custom model field is always available and never hidden.
+3. **Examples** — the "Examples" dropdown is a convenience to copy a known ID into the field; examples are not guaranteed available for every account.
+
 Reliability guarantees:
 
 - **App works with no key.** Demo mode is the default.
 - **Keys are never stored** in `localStorage`, JSON exports, or server logs.
 - **Keys are never echoed** to the client after submission.
 - **BYOK output is explanation-only.** The deterministic policy kernel remains the source of truth for Guardian decision, risk score, allowed/blocked actions, matched policies, and human-review requirement.
-- **Model IDs drift over time** as providers retire aliases. Each provider has a small preset list of currently-valid IDs, but the UI **always allows a custom model ID** so the user can paste any model their account has access to.
-- **Azure OpenAI** is treated as deployment-based: enter your resource endpoint, deployment name, and (optionally) API version. The deployment name is not the same as the underlying model name.
-- **Anthropic** uses dated stable model IDs (e.g. `claude-3-5-haiku-20241022`) rather than `-latest` aliases, which Anthropic rotates and which can return 404 once retired. If a preset ever fails on your account, paste a model ID from [Anthropic's docs](https://docs.anthropic.com/en/docs/about-claude/models) into the custom model field.
-- **Normalized error types** — `model_not_found`, `invalid_api_key`, `rate_limited`, `provider_unavailable`, `malformed_request`, `network_error`, `unknown_error` — drive friendly status pills like "Model Not Found · Falling Back" instead of raw provider stack traces. Raw details are collapsed under "Technical details".
+- **No stale hardcoded defaults.** Anthropic has no default model — the UI nudges the user to load models or paste a model ID their account owns. OpenAI / Mistral / OpenRouter have light defaults that the user can always replace.
+- **Azure OpenAI** uses deployment names from your Azure OpenAI resource, not public model IDs. The UI surfaces explicit endpoint / deployment-name / API-version fields. Listing Azure deployments requires Azure management-plane permissions and is not implemented; enter the deployment name exactly as it appears in your Azure portal.
+- **Normalized error types** — `model_not_found`, `invalid_api_key`, `permission_denied`, `region_unavailable`, `rate_limited`, `provider_unavailable`, `malformed_request`, `network_error`, `unknown_error` — drive friendly status pills like "Model Not Available · Falling Back" instead of raw provider stack traces. Raw details are collapsed under "Technical details".
+- **Model-list endpoint:** `POST /api/ai/models` accepts `{ provider, apiKey? }` and returns `{ ok, provider, models? | errorType, message?, fallbackUsed? }`. Keys are never logged or persisted by this route.
 
 If BYOK fails for any reason, the page does not crash and the Guardian decision does not change.
 

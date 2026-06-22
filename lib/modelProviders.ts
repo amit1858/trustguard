@@ -3,18 +3,23 @@ import type { AIProvider } from "./types";
 /**
  * Provider model registry.
  *
- * IMPORTANT — model IDs drift over time. Each provider deprecates/renames
- * model IDs on their own schedule, so a hardcoded "default" model that ships
- * today can return 404 in three months. This registry is structured so that:
+ * IMPORTANT — model availability is custom-first.
  *
- *   1. Presets are suggestions only; the UI always allows a custom model ID.
- *   2. Defaults use dated/stable model IDs ("YYYY-MM-DD") wherever the
- *      provider supports them, because dated IDs are pinned and don't move.
- *   3. If a preset returns "model not found", the UI surfaces a friendly
- *      error and tells the user to enter a custom model ID from their account.
+ * Provider model IDs drift over time and vary by account, region, and
+ * platform. A model that worked last quarter can return 404 today, and a
+ * preset that works for one account may be unavailable for another. This
+ * registry treats presets as **examples only** and never forces them as
+ * the only path.
  *
- * Before a demo: visit the provider's docs and confirm a preset still works,
- * or enter the model ID you know is enabled in your account.
+ * Recommended user flow:
+ *   1. Load available models (where the provider exposes a list endpoint), OR
+ *   2. Enter a custom model ID from the provider console / docs.
+ *   3. Presets in this file are example IDs — convenience, not guarantee.
+ *
+ * Anthropic specifically does NOT have a hardcoded default. The user must
+ * load models or paste a model ID their account has access to. This avoids
+ * the recurring "claude-3-5-haiku-… returns 404" issue caused by hardcoded
+ * defaults going stale.
  */
 
 export interface ModelPreset {
@@ -22,7 +27,7 @@ export interface ModelPreset {
   id: string;
   /** Human-readable label in the dropdown. */
   label: string;
-  /** Optional short hint shown under the model preset (e.g., "low cost"). */
+  /** Optional short hint shown under the model preset (e.g., "example"). */
   hint?: string;
 }
 
@@ -31,12 +36,20 @@ export interface ProviderMeta {
   displayName: string;
   /** Short helper copy shown under the provider dropdown. */
   helperText: string;
-  /** Suggested model presets. Customers can always override with a custom ID. */
+  /** Example model IDs. Treated as suggestions only, never required. */
   presets: ModelPreset[];
-  /** Default preset index (0 by default). The default is a suggestion. */
+  /**
+   * Default preset ID. Empty string = no default — UI prompts user to
+   * load models or enter a custom ID. Used for providers (like Anthropic
+   * and Azure) where forcing a default produces brittle demo behavior.
+   */
   defaultPresetId: string;
-  /** Always true today — the registry encourages custom model input. */
+  /** Always true — the registry encourages custom model input. */
   allowsCustomModel: true;
+  /** True if the provider exposes a model-list endpoint we can call. */
+  supportsModelListing: boolean;
+  /** Placeholder text for the custom model input. */
+  modelPlaceholder: string;
   /** What extra fields this provider needs in the BYOK UI. */
   needs: {
     endpoint?: boolean;
@@ -51,14 +64,17 @@ export const PROVIDERS: ProviderMeta[] = [
   {
     id: "openai",
     displayName: "OpenAI",
-    helperText: "Enter an OpenAI API key and a model ID enabled for your account.",
+    helperText:
+      "Enter an OpenAI API key, then load available models or enter any model ID enabled for your account. Presets are examples.",
     presets: [
-      { id: "gpt-4o-mini", label: "gpt-4o-mini", hint: "low cost · fast" },
-      { id: "gpt-4o", label: "gpt-4o", hint: "stronger" },
-      { id: "gpt-4.1-mini", label: "gpt-4.1-mini", hint: "alternative" },
+      { id: "gpt-4o-mini", label: "gpt-4o-mini", hint: "example" },
+      { id: "gpt-4o", label: "gpt-4o", hint: "example" },
+      { id: "gpt-4.1-mini", label: "gpt-4.1-mini", hint: "example" },
     ],
     defaultPresetId: "gpt-4o-mini",
     allowsCustomModel: true,
+    supportsModelListing: true,
+    modelPlaceholder: "e.g. gpt-4o-mini or any model ID enabled for your account",
     needs: {},
     docsUrl: "https://platform.openai.com/docs/models",
   },
@@ -66,13 +82,15 @@ export const PROVIDERS: ProviderMeta[] = [
     id: "azure_openai",
     displayName: "Azure OpenAI",
     helperText:
-      "Enter your Azure resource endpoint, deployment name (not model name), and API key.",
-    // Azure model field is a *deployment name* unique to the customer's
-    // resource — no global presets are meaningful. The UI hides the preset
-    // dropdown for Azure and shows a deployment-name input instead.
+      "Azure OpenAI uses deployment names, not model IDs. Enter your resource endpoint, deployment name, API version, and API key.",
     presets: [],
     defaultPresetId: "",
     allowsCustomModel: true,
+    // Listing deployments requires Azure management-plane permissions —
+    // we don't implement that. UI shows a clear "enter deployment name"
+    // message instead of a model-list button.
+    supportsModelListing: false,
+    modelPlaceholder: "your deployment name (not a raw model ID)",
     needs: { endpoint: true, deployment: true, apiVersion: true },
     docsUrl:
       "https://learn.microsoft.com/azure/ai-services/openai/how-to/create-resource",
@@ -81,42 +99,37 @@ export const PROVIDERS: ProviderMeta[] = [
     id: "anthropic",
     displayName: "Anthropic",
     helperText:
-      "Enter an Anthropic API key and a currently available Claude model ID. Dated IDs (claude-3-5-…-2024xxxx) are pinned and most stable.",
-    // Dated stable IDs — Anthropic pins these. The `-latest` aliases tend to
-    // 404 once a model rolls forward, which is what caused the original bug.
+      "Model availability varies by account. Use “Load available models” or copy a model ID from the Anthropic Console / API docs. Presets are examples and may not be available to every account.",
+    // Examples only — these are NOT a guarantee that the model is available
+    // to a given account, region, or API plan. We do not pick a default so
+    // the user is nudged to load or paste a model ID they own.
     presets: [
-      {
-        id: "claude-3-5-haiku-20241022",
-        label: "claude-3-5-haiku-20241022",
-        hint: "low cost · dated",
-      },
-      {
-        id: "claude-3-5-sonnet-20241022",
-        label: "claude-3-5-sonnet-20241022",
-        hint: "stronger · dated",
-      },
-      {
-        id: "claude-3-haiku-20240307",
-        label: "claude-3-haiku-20240307",
-        hint: "older · cheap",
-      },
+      { id: "claude-haiku-4-5-20251001", label: "claude-haiku-4-5-20251001", hint: "example" },
+      { id: "claude-sonnet-4-6", label: "claude-sonnet-4-6", hint: "example" },
+      { id: "claude-opus-4-8", label: "claude-opus-4-8", hint: "example" },
     ],
-    defaultPresetId: "claude-3-5-haiku-20241022",
+    defaultPresetId: "",
     allowsCustomModel: true,
+    supportsModelListing: true,
+    modelPlaceholder:
+      "enter model ID, e.g. claude-haiku-4-5-20251001 or another model available to your API account",
     needs: {},
     docsUrl: "https://docs.anthropic.com/en/docs/about-claude/models",
   },
   {
     id: "mistral",
     displayName: "Mistral AI",
-    helperText: "Enter a Mistral API key and a model ID enabled for your account.",
+    helperText:
+      "Enter a Mistral API key, then load available models or enter any model ID enabled for your account. Presets are examples.",
     presets: [
-      { id: "mistral-small-latest", label: "mistral-small-latest", hint: "low cost" },
-      { id: "mistral-large-latest", label: "mistral-large-latest", hint: "stronger" },
-      { id: "open-mistral-7b", label: "open-mistral-7b", hint: "open weights" },
+      { id: "mistral-small-latest", label: "mistral-small-latest", hint: "example" },
+      { id: "mistral-large-latest", label: "mistral-large-latest", hint: "example" },
+      { id: "open-mistral-7b", label: "open-mistral-7b", hint: "example" },
     ],
     defaultPresetId: "mistral-small-latest",
     allowsCustomModel: true,
+    supportsModelListing: true,
+    modelPlaceholder: "e.g. mistral-small-latest or any model enabled for your account",
     needs: {},
     docsUrl: "https://docs.mistral.ai/getting-started/models/",
   },
@@ -124,22 +137,16 @@ export const PROVIDERS: ProviderMeta[] = [
     id: "openrouter",
     displayName: "OpenRouter",
     helperText:
-      "Enter an OpenRouter API key and a model route in provider/model form (e.g. openai/gpt-4o-mini).",
+      "OpenRouter routes use provider/model format (e.g. openai/gpt-4o-mini). Load available routes or enter any route ID. Presets are examples.",
     presets: [
-      { id: "openai/gpt-4o-mini", label: "openai/gpt-4o-mini", hint: "low cost" },
-      {
-        id: "anthropic/claude-3.5-haiku",
-        label: "anthropic/claude-3.5-haiku",
-        hint: "Claude",
-      },
-      {
-        id: "meta-llama/llama-3.1-8b-instruct",
-        label: "meta-llama/llama-3.1-8b-instruct",
-        hint: "open",
-      },
+      { id: "openai/gpt-4o-mini", label: "openai/gpt-4o-mini", hint: "example" },
+      { id: "anthropic/claude-3.5-sonnet", label: "anthropic/claude-3.5-sonnet", hint: "example" },
+      { id: "meta-llama/llama-3.1-8b-instruct", label: "meta-llama/llama-3.1-8b-instruct", hint: "example" },
     ],
     defaultPresetId: "openai/gpt-4o-mini",
     allowsCustomModel: true,
+    supportsModelListing: true,
+    modelPlaceholder: "e.g. openai/gpt-4o-mini or any OpenRouter route",
     needs: {},
     docsUrl: "https://openrouter.ai/models",
   },
@@ -153,10 +160,12 @@ export function getDefaultModelFor(id: AIProvider): string {
   return findProvider(id)?.defaultPresetId ?? "";
 }
 
-// Common normalized error codes returned by the BYOK API route.
+// Common normalized error codes returned by the BYOK API routes.
 export type ProviderErrorType =
   | "model_not_found"
   | "invalid_api_key"
+  | "permission_denied"
+  | "region_unavailable"
   | "rate_limited"
   | "provider_unavailable"
   | "malformed_request"
@@ -175,14 +184,32 @@ export interface AIRouteResponse {
   fallbackUsed: boolean;
 }
 
+export interface ModelListEntry {
+  id: string;
+  displayName?: string;
+}
+
+export interface ModelListResponse {
+  ok: boolean;
+  provider: AIProvider;
+  models?: ModelListEntry[];
+  errorType?: ProviderErrorType;
+  message?: string;
+  fallbackUsed?: boolean;
+}
+
 /** Friendly, demo-safe message for each error type. */
 export function friendlyErrorMessage(type: ProviderErrorType, provider: AIProvider): string {
   const name = findProvider(provider)?.displayName ?? provider;
   switch (type) {
     case "model_not_found":
-      return `Model not found for ${name}. Choose another preset or enter a custom model ID available in your account.`;
+      return `Model not found or not available for this ${name} account. Load available models or enter a model ID available in your account.`;
     case "invalid_api_key":
-      return `Invalid API key for ${name}. Check the key and try again.`;
+      return `Invalid API key. Check the key and provider.`;
+    case "permission_denied":
+      return `Your ${name} account may not have access to this model. Try another model or check your account permissions.`;
+    case "region_unavailable":
+      return `This model may not be available in your selected ${name} region or platform.`;
     case "rate_limited":
       return `${name} rate-limited the request. Try again in a moment.`;
     case "provider_unavailable":
