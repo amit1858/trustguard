@@ -8,6 +8,75 @@ for Ads Trust & Safety, where a **Guardian Agent** overlays an **Orchestrator Ag
 
 ---
 
+## Phase 3 — Operational Realism
+
+Phases 3A through 3D transform TrustGuard from a scenario simulator into a realistic operational control
+plane for an enterprise ads trust & safety team.
+
+### Summary: 3A → 3D
+
+| Phase | Focus | What it adds |
+|---|---|---|
+| **3A** | Lifecycle + Queue Health + SLA | Event lifecycle timeline, live stream feed, SLA state (on-time / at-risk / breached), queue health strip |
+| **3B** | Investigation + Evidence + Quality | Case investigation timeline, evidence request pack, assignment history, appeal review path, quality markers |
+| **3C** | Agent Registry + Governance | Agent registry, governance rules, permission check, agent governance view with trust tiers |
+| **3D** | Executive Metrics + Operational Insights | Leadership dashboard, reviewer agreement rate, calibration panel, policy pressure, agent risk leaderboard, operational insight narratives |
+
+### What's still mocked
+
+- **All metrics are deterministic seed-data computations.** There is no live event ingestion, no real
+  advertiser accounts, no real reviewer accounts.
+- **Reviewer outcomes** are deterministic seed records. In production, these come from the real review
+  workflow with authenticated reviewer identities.
+- **Calibration metrics** (false positives, false negatives) are static mocks — clearly labelled as
+  "prototype simulation" in the UI.
+- **Decision latency** ("238 ms") is a fixed mock.
+- **SLA timers** are seeded timestamps derived from a fixed anchor date
+  (`2026-06-21T14:00:00Z`), not real wall-clock SLAs.
+- **Audio Overview** is a static `.m4a` file; no real TTS pipeline.
+- **BYOK / AI explanation** is optional; the deterministic kernel always fires first.
+
+### What production would require
+
+| Capability | Production requirement |
+|---|---|
+| Real event ingestion | Pub/Sub or Kafka topic → Guardian evaluation API → decision ledger write |
+| Real reviewer accounts | Identity provider integration (e.g., Okta/SAML), per-reviewer outcome attribution |
+| Real ledger sink | Append-only audit store (BigQuery, S3 + Athena, or purpose-built compliance DB) |
+| Real SLA timers | Scheduler service comparing case `createdAt` against SLA config per priority |
+| Real agent identity | Agent auth tokens issued at agent registration; forwarded in every Guardian API call |
+| Real policy authoring | Policy authoring workflow (draft → council review → approval → version tagging) |
+| Real metrics warehouse | Event stream → metrics pipeline → dashboard (e.g., Looker, Grafana, Cube.js) |
+| Calibration feedback loop | Human reviewer outcome store → weekly FP/FN analysis → policy recalibration |
+
+### Recommended shadow-mode pilot
+
+**BrightFast Loans — Misleading Financial Claim (India)**
+
+This scenario is the ideal first shadow-mode pilot because it combines:
+- Three independent critical signals (misleading guaranteed-return claim, missing RBI NBFC
+  registration, no APR/lender disclosure)
+- A new advertiser with thin KYC (11-day-old account, partial GST verification)
+- A domain registered 9 days prior sharing ASN infrastructure with known violators
+- An aggressive CPL bid 3.2× the category median
+
+Running this flow in shadow mode would validate Guardian's BLOCK decision against a live event
+stream before enabling enforcement production mode.
+
+### Updated final demo path
+
+> **Control Plane** (executive metrics + audio overview)
+> → **Runtime Events** (live stream + lifecycle)
+> → **Agent Governance** (registry + trust tiers + governance rules)
+> → **BrightFast Loans BLOCK scenario** (scenario tab → Guardian interception)
+> → **Review Queue** (case list + SLA state)
+> → **Case Detail** (investigation timeline + evidence + appeal path)
+> → **Simulation Lab**
+> → **Connectors / Readiness**
+> → Close on shadow-mode pilot recommendation
+
+---
+
 ## Product concept
 
 Most agentic ads stacks today look like this:
@@ -866,3 +935,265 @@ No other blocking issues were found.
 8. **Closing line:** *"TrustGuard is the runtime Trust & Safety control layer
    that lets agentic ads workflows move faster without losing policy
    control."*
+
+---
+
+## Phase 3C — Agent Identity and Permission Governance
+
+Phase 3C introduces **agent identity**, **per-agent authorization**, and
+**governance rules** as first-class concepts in TrustGuard. Until now the app
+tracked *what* an agent proposed; Phase 3C tracks *who proposed it*, *whether
+they were authorized to ask*, and *what governance rules constrain that agent*.
+
+---
+
+### Why agent identity matters
+
+Not all agents carry the same risk profile.
+
+| Agent | Risk profile | Why it matters |
+|---|---|---|
+| Budget Optimization Agent | Low trust | Can silently multiply spend without identity checks |
+| Appeal Resolution Agent | Medium trust | Can bypass compliance gates if allowed to auto-approve |
+| Campaign Orchestrator Agent | Medium trust | Coordinates the entire workflow — a compromised plan causes cascading risk |
+| Human Reviewer Copilot | High trust | Advisory only — must never change enforcement outcomes |
+| Guardian Agent | System trust | The policy enforcement layer; its decisions are immutable |
+
+When Trust & Safety events are recorded without agent identity, operators cannot
+answer: *"Which agent proposed this 4× budget increase, and was it authorized
+to do so?"* Phase 3C makes that question answerable.
+
+---
+
+### Why Guardian is more than a content classifier
+
+Guardian is commonly compared to a content classifier — it receives a request
+and says `ALLOW` or `BLOCK`. Phase 3C shows why that framing is too narrow.
+
+**Guardian gates by agent + action + scope, not just content.**
+
+1. **Agent identity check.** Is this agent registered? What is its trust tier?
+2. **Action authorization.** Is the requested action in the agent's allowed list?
+   Is it in the restricted list? Does it require Guardian pre-approval?
+3. **Scope check.** Does the proposed scope (budget multiple, audience
+   narrowing, appeal category) exceed the agent's authority?
+4. **Policy evaluation.** Does the action violate any active POL-* rules?
+5. **Decision.** `ALLOW` / `ALLOW_WITH_CONDITIONS` / `RESTRICT` / `ESCALATE` /
+   `BLOCK` — with reason codes, audit trail, and a binding final result.
+
+A pure content classifier would miss risks that arise from *who is acting* and
+*whether they were authorized to act*. Guardian's deterministic policy kernel
+incorporates all five layers.
+
+---
+
+### How action authorization works
+
+```
+Registry → Permission Check → Guardian (if required) → Human Review (if Guardian escalates)
+```
+
+1. **Registry lookup** (`lib/agentRegistry.ts`). Every agent has:
+   - `allowedActions` — what it may request
+   - `restrictedActions` — what it is explicitly blocked from requesting
+   - `requiresGuardianFor` — actions it may request, but only after Guardian approval
+   - `trustTier` — Low / Medium / High / System
+2. **Permission check** (`lib/permissionCheck.ts`). `checkAgentPermission(agentId, requestedAction, guardianDecision?)` returns:
+   - `authorizationLevel`: Allowed / Restricted / Not authorized
+   - `requiresGuardianApproval`: boolean
+   - `humanApprovalRequired`: boolean (derived from Guardian decision if available)
+   - `finalResult`: Allowed to request | Requires Guardian approval | Requires human review | Not authorized
+3. **Guardian evaluation.** If the action requires Guardian approval (or the
+   policy kernel fires on the request), Guardian produces a binding decision.
+4. **Human review.** If Guardian returns `ESCALATE`, the event routes to the
+   human Review Queue. An `ALLOW_WITH_CONDITIONS` on a restricted action
+   similarly requires human sign-off.
+
+The permission check is **deterministic** — it drives off static registry data,
+not a model. No external API is called.
+
+---
+
+### Why Orchestrator cannot override Guardian
+
+The Orchestrator Agent's job is *task completion*. It coordinates the
+multi-agent workflow, decomposes requests into worker tasks, and proposes
+actions. Its incentive is to make the action succeed.
+
+The Guardian Agent's job is *risk and policy*. Its incentive is to apply
+versioned policy rules correctly, not to make the action succeed.
+
+If the Orchestrator could override the Guardian, the separation of duties that
+Trust & Safety requires would collapse. A manipulated Orchestrator (or an
+Orchestrator optimizing for spend growth) could bypass every policy gate.
+
+**Governance rule GOV-005 is enforced:** the Orchestrator is explicitly blocked
+from `override_guardian_decision` and `execute_without_guardian`. It may propose
+actions and submit them to Guardian. It cannot execute without Guardian approval
+and it cannot ignore a BLOCK, RESTRICT, or ESCALATE ruling.
+
+This is also why the `Campaign Orchestrator Agent` carries `trustTier: "Medium"`
+while the `Guardian Agent` carries `trustTier: "System"`. System-tier agents are
+the only agents whose decisions are binding on the rest of the workflow.
+
+---
+
+### Files added / modified (Phase 3C)
+
+| File | Status | Purpose |
+|---|---|---|
+| `lib/agentRegistry.ts` | **New** | 8 registered agents with trust tiers, allowed/restricted/requiresGuardianFor actions, owners, statuses, and deterministic counter helpers |
+| `lib/governanceRules.ts` | **New** | 5 enforced governance rules (GOV-001 – GOV-005) |
+| `lib/permissionCheck.ts` | **New** | `checkAgentPermission()` — deterministic authorization result |
+| `components/AgentPermissionCheck.tsx` | **New** | Panel component rendering agent identity + permission result |
+| `components/views/AgentGovernanceView.tsx` | **New** | Agent Governance view — registry table, agent detail drawer, governance rule cards |
+| `lib/runtimeEvents.ts` | **Modified** | Added `sourceAgentId`, `requestedPermission`, `actionSensitivity`, `guardianRequired` to `RuntimeEvent`; mapped all seeded events to registry agent IDs |
+| `lib/deepLinks.ts` | **Modified** | Added `agent` param (`?view=agent-governance&agent=<agentId>`) |
+| `components/AppShell.tsx` | **Modified** | Added `agent-governance` to `ViewId` union and NAV |
+| `components/views/RuntimeEventsView.tsx` | **Modified** | Trust tier pill + sensitivity pill in table rows; Source Agent section in Event Detail drawer |
+| `components/views/CaseDetailDrawer.tsx` | **Modified** | Agent Permission Check panel in Case Detail drawer |
+| `app/page.tsx` | **Modified** | Wired AgentGovernanceView, `initialAgentId` state, `agent` param in deep-link handler |
+
+### Nav decision
+
+A new **Agent Governance** view was added as the 9th left-nav item (⬡ icon,
+between Runtime Events and Connectors). The nav comfortably holds 9 items with
+the existing 232 px expanded width. An "Agent Registry panel inside Runtime
+Events" was considered but rejected — Agent Governance is conceptually distinct
+from the event feed, and embedding it would obscure the storytelling value of
+treating agent identity as a first-class governance surface.
+
+### Deep links added
+
+- `/?view=agent-governance` — Agent Governance view
+- `/?view=agent-governance&agent=<agentId>` — opens the Agent Detail drawer directly
+
+### Guardrails confirmed
+
+- ✅ `lib/guardianEngine.ts` — unchanged
+- ✅ `lib/policies.ts` — unchanged
+- ✅ Guardian decision immutability preserved
+- ✅ BYOK — unchanged
+- ✅ No external API calls
+- ✅ Existing deep links preserved (case, event, scenario, policy params)
+- ✅ Audio Overview, Executive Demo, BYOK popover, Reset Demo State, Copy Link — all still work
+- ✅ localStorage persistence, SSR-safe
+- ✅ Enterprise charcoal/amber theme
+- ✅ Phase 3A + 3B features unmodified
+
+---
+
+## Phase 3D � Executive Metrics and Operational Insights
+
+Phase 3D adds a leadership-grade operational layer on top of the Control Plane, providing executive
+metrics, reviewer calibration signals, policy firing analysis, agent risk ranking, and strategic
+operational insight narratives.
+
+### Components added
+
+| Component | Purpose |
+|---|---|
+| `lib/executiveMetrics.ts` | Central computation hub � all metrics derived deterministically from seeded scenarios, policies, agent registry, and runtime events |
+| `components/ExecutiveMetricsDashboard.tsx` | 4-column tile grid: 12 leadership KPIs including actions evaluated/allowed/restricted/escalated/blocked, human review rate, avg risk, top policy, highest-risk vertical/market, runtime coverage, risky actions prevented, reviewer agreement rate |
+| `components/CalibrationPanel.tsx` | Prototype calibration panel � potential FP/FN mocks, policy calibration count, reviewer disagreement deep-links. Clearly labelled as prototype simulation |
+| `components/PolicyPressurePanel.tsx` | Policy firing analysis � tabbed view: most firing, most review load, most associated with BLOCK, most associated with ESCALATE, zero-hit policies. Rows deep-link to Policy Console |
+| `components/AgentRiskLeaderboard.tsx` | Source agents ranked by interventions / blocked / escalation rate / avg risk. Trust tier pill per row. Each row deep-links to Agent Governance agent detail drawer |
+| `components/OperationalInsightCards.tsx` | Three deterministic narrative cards: most risky workflow, top intervention driver, best shadow-mode pilot candidate |
+
+### Leadership metrics explained
+
+| Metric | Derivation |
+|---|---|
+| Actions evaluated | `SCENARIOS.length` � total Guardian evaluations in the seed dataset |
+| Actions allowed | `byDecision.ALLOW + byDecision.ALLOW_WITH_CONDITIONS` |
+| Actions restricted | `byDecision.RESTRICT` |
+| Actions escalated | `byDecision.ESCALATE` |
+| Actions blocked | `byDecision.BLOCK` |
+| Human review rate | `humanReviewRequired=true` cases � total evaluations � 100 |
+| Avg risk score | Mean Guardian risk score across all scenario evaluations |
+| Top policy triggered | Policy ID with highest hit count across all matched policies |
+| Highest risk vertical | Vertical with highest mean Guardian risk score |
+| Highest risk market | Market with highest mean Guardian risk score |
+| Runtime interception coverage | `evaluated_events � total_events � 100` where "evaluated" = status ? "New" |
+| Est. risky actions prevented | `BLOCK + ESCALATE` count (actions that would have proceeded without Guardian) |
+
+### Reviewer agreement rate
+
+`computeReviewerAgreementRate()` uses deterministic seed review outcomes (4 cases):
+- **Agreement** outcomes: "Upheld Guardian Decision", "Approved with Conditions", "Escalated to Policy", "No Action Needed"
+- **Disagreement** outcome: "Reversed after Evidence"
+- **Excluded**: "Closed as Duplicate" (neutral, not counted)
+
+Seed: 3 agreements (misleading_finance BLOCK upheld, suspicious_budget ESCALATE confirmed,
+risky_ai_targeting RESTRICT upheld) and 1 disagreement (appeal_review ESCALATE reversed after
+advertiser provided substantiation) ? **75% agreement rate**.
+
+### Calibration panel disclaimer
+
+The Calibration Panel is explicitly labelled:
+> "Prototype simulation � calibration metrics are deterministic mocks for demo."
+
+Potential FP (2) and FN (1) counts are static, justified by scenario characteristics:
+- FP: regulated_missing_cert (conservative ALLOW_WITH_CONDITIONS on clean advertiser) + risky_ai_targeting (RESTRICT on historically-clean advertiser)
+- FN: clean_launch (ALLOW on Contoso Fitness � same vertical as the BrightFast BLOCK, different signals)
+
+### Control Plane layout decision
+
+Phase 3D components are inserted between `AudioOverviewCard` and `ArchitectureStrip`:
+
+1. `ControlPlaneMetrics` (existing � decision distribution bar is unique, kept)
+2. `ExecutiveMetricsDashboard` (new � 4�4 tile grid, leadership KPIs)
+3. `CalibrationPanel` + `PolicyPressurePanel` in a **2-column grid** on `lg:` screens (compact, side-by-side)
+4. `AgentRiskLeaderboard` (new � full width, sortable)
+5. `InsightCards` (existing � 4-card summary row)
+6. `OperationalInsightCards` (new � 3 narrative cards)
+
+The existing `ControlPlaneMetrics` is **retained** because its decision distribution bar (the
+proportional colored strip across all 5 decisions) is visually distinct from the tile grid and
+tells a different story � aggregate decision breakdown vs. individual KPI spotlight.
+
+### All metrics are deterministic mocks from seed data
+
+Every number in Phase 3D is derived from:
+- `SCENARIOS` (6 seed scenarios) evaluated by `evaluateGuardian`
+- `POLICY_RULES` (8 policies in `lib/policies.ts`)
+- `AGENT_REGISTRY` (8 registered agents)
+- `getRuntimeEvents()` (10 seeded events � 6 scenario-mapped + 4 synthetic pending)
+- `SEED_REVIEW_OUTCOMES` (4 deterministic reviewer outcome records in `lib/executiveMetrics.ts`)
+
+No randomness. No external API calls. No localStorage dependency for metric computation (metrics
+are pure functions of seed data, safe for SSR).
+
+### Deep links added
+
+- Executive Metrics Dashboard ? no new deep-link param (lives on Control Plane)
+- Policy Pressure rows ? `?view=policy-console&policy=<id>`
+- Agent Leaderboard rows ? `?view=agent-governance&agent=<id>`
+- Calibration disagreement cases ? `?case=<caseId>`
+- Operational Insight narratives ? `?scenario=<id>`, `?case=<id>`, `?view=policy-console&policy=<id>`
+
+### Files added / modified (Phase 3D)
+
+| File | Status | Purpose |
+|---|---|---|
+| `lib/executiveMetrics.ts` | **New** | All Phase 3D computations: executive metrics, reviewer agreement rate, policy pressure, agent leaderboard |
+| `components/ExecutiveMetricsDashboard.tsx` | **New** | 12-tile leadership KPI grid + reviewer agreement rate strip |
+| `components/CalibrationPanel.tsx` | **New** | Prototype calibration panel with FP/FN mocks and case deep-links |
+| `components/PolicyPressurePanel.tsx` | **New** | Tabbed policy firing analysis, deep-links to Policy Console |
+| `components/AgentRiskLeaderboard.tsx` | **New** | Sortable agent risk leaderboard, deep-links to Agent Governance |
+| `components/OperationalInsightCards.tsx` | **New** | Three deterministic narrative insight cards |
+| `components/views/ControlPlaneView.tsx` | **Modified** | Wired all 5 new Phase 3D components into Control Plane layout |
+| `README.md` | **Modified** | Added Phase 3 Operational Realism section + Phase 3D section |
+
+### Guardrails confirmed
+
+- ? `lib/guardianEngine.ts` � unchanged (read-only)
+- ? `lib/policies.ts` � unchanged
+- ? Guardian decision immutability preserved
+- ? BYOK � unchanged
+- ? No external API calls
+- ? Existing deep links preserved (`case`, `event`, `scenario`, `policy`, `agent` params)
+- ? Audio Overview, Executive Demo, BYOK popover, Reset Demo State, Copy Link � all still work
+- ? localStorage persistence, SSR-safe (all new metric functions are pure, server-renderable)
+- ? Enterprise charcoal/amber theme � no neon
+- ? Phases 3A + 3B + 3C features unmodified

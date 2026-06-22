@@ -113,3 +113,37 @@ export interface BYOKConfig {
     riskSummary: boolean;
   };
 }
+
+// ─── Phase 3B: Case Management Depth ─────────────────────────────────────────
+
+export type EvidenceCategory =
+  | "business_verification"
+  | "certification_document"
+  | "landing_page_disclosure"
+  | "claim_substantiation"
+  | "payment_instrument_proof"
+  | "appeal_explanation";
+
+export type EvidenceRequestStatus = "requested" | "received" | "insufficient" | "accepted";
+
+export interface EvidenceRequest {
+  id: string;
+  category: EvidenceCategory;
+  status: EvidenceRequestStatus;
+  requestedAt: string;
+  updatedAt?: string;
+  note?: string;
+}
+
+export interface AssignmentHistoryEntry {
+  ownerId: string;
+  ownerName: string;
+  assignedAt: string;
+  source: "manual" | "system" | "queue_rule";
+}
+
+export type QualityMarker =
+  | "not_reviewed"
+  | "needs_qa"
+  | "qa_passed"
+  | "policy_calibration_needed";

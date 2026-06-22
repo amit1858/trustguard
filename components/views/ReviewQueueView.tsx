@@ -7,7 +7,11 @@ import {
   DECISION_COLORS,
   PRIORITY_COLORS,
   STATUS_COLORS,
+  QUALITY_MARKER_COLORS,
+  QUALITY_MARKER_LABELS,
 } from "@/lib/cases";
+import QueueHealthStrip from "@/components/QueueHealthStrip";
+import { SLA_STATE_COLORS, SLA_STATE_LABELS, computeSlaState } from "@/lib/sla";
 import CaseDetailDrawer from "./CaseDetailDrawer";
 
 type Filter = "all" | "critical" | "escalate" | "block" | "restrict" | "waiting";
@@ -84,6 +88,13 @@ export default function ReviewQueueView({
           Guardian decisions are immutable — operators add review outcomes.
         </p>
       </header>
+
+      <p className="-mt-2 text-xs italic text-[var(--ink-2)]">
+        Reviewers manage queue health, intervene before SLA breach, and preserve the original
+        Guardian verdict.
+      </p>
+
+      <QueueHealthStrip />
 
       {/* Summary tiles */}
       <section className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -199,13 +210,25 @@ export default function ReviewQueueView({
               )}
             </div>
             <div className="text-xs font-semibold">{c.riskScore}</div>
-            <div className="text-xs">
+            <div className="flex flex-wrap gap-1 text-xs">
               <span
                 className="pill text-[10px]"
                 style={{ borderColor: PRIORITY_COLORS[c.priority] + "70", color: PRIORITY_COLORS[c.priority] }}
               >
                 {c.sla}
               </span>
+              {(() => {
+                const slaState = c.slaState ?? (c.slaDueAt ? computeSlaState(c.slaDueAt) : "on_track");
+                const slaColor = SLA_STATE_COLORS[slaState];
+                return (
+                  <span
+                    className="pill text-[10px]"
+                    style={{ borderColor: slaColor + "70", color: slaColor }}
+                  >
+                    {SLA_STATE_LABELS[slaState]}
+                  </span>
+                );
+              })()}
             </div>
             <div>
               <span
@@ -217,6 +240,17 @@ export default function ReviewQueueView({
               >
                 {c.status}
               </span>
+              {c.qualityMarker && c.qualityMarker !== "not_reviewed" && (
+                <span
+                  className="pill text-[10px] mt-1 block"
+                  style={{
+                    borderColor: QUALITY_MARKER_COLORS[c.qualityMarker] + "70",
+                    color: QUALITY_MARKER_COLORS[c.qualityMarker],
+                  }}
+                >
+                  {QUALITY_MARKER_LABELS[c.qualityMarker]}
+                </span>
+              )}
             </div>
             <div className="text-xs text-[var(--ink-2)] truncate">{c.owner}</div>
           </button>

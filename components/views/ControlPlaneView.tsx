@@ -24,7 +24,13 @@ import AudioOverviewCard from "@/components/AudioOverviewCard";
 import ControlPlaneMetrics from "@/components/ControlPlaneMetrics";
 import InsightCards from "@/components/InsightCards";
 import ReadinessPanel from "@/components/ReadinessPanel";
+import ExecutiveMetricsDashboard from "@/components/ExecutiveMetricsDashboard";
+import CalibrationPanel from "@/components/CalibrationPanel";
+import PolicyPressurePanel from "@/components/PolicyPressurePanel";
+import AgentRiskLeaderboard from "@/components/AgentRiskLeaderboard";
+import OperationalInsightCards from "@/components/OperationalInsightCards";
 import { ProductionWarningBanner } from "@/components/EnvironmentSelector";
+import QueueHealthStrip from "@/components/QueueHealthStrip";
 import { usePersona } from "@/lib/persona";
 
 export default function ControlPlaneView({
@@ -120,6 +126,13 @@ export default function ControlPlaneView({
 
       <ExecutiveSummaryCard />
 
+      <p className="-mt-2 text-xs italic text-[var(--ink-2)]">
+        Operational narrative mirrors the queue: Guardian allows safe launches, restricts unsafe
+        actions, and surfaces human review load live.
+      </p>
+
+      <QueueHealthStrip />
+
       <AudioOverviewCard />
 
       <div
@@ -138,8 +151,28 @@ export default function ControlPlaneView({
 
       <ControlPlaneMetrics />
 
+      {/* ── Phase 3D: Executive Metrics Dashboard ── */}
+      <ExecutiveMetricsDashboard />
+
+      {/* ── Phase 3D: Calibration Panel + Policy Pressure (2-col on lg) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <CalibrationPanel />
+        <PolicyPressurePanel
+          onOpenPolicy={onOpenPolicy ? (id) => onOpenPolicy(id) : undefined}
+        />
+      </div>
+
+      {/* ── Phase 3D: Agent Risk Leaderboard ── */}
+      <AgentRiskLeaderboard />
+
       <InsightCards
         onOpenPolicy={onOpenPolicy ? () => onOpenPolicy() : undefined}
+        onOpenRuntimeEvents={onOpenRuntimeEvents}
+      />
+
+      {/* ── Phase 3D: Operational Insight Narratives ── */}
+      <OperationalInsightCards
+        onOpenPolicy={onOpenPolicy}
         onOpenRuntimeEvents={onOpenRuntimeEvents}
       />
 

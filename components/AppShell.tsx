@@ -10,7 +10,8 @@ export type ViewId =
   | "runtime-events"
   | "connectors"
   | "audit-log"
-  | "byok-settings";
+  | "byok-settings"
+  | "agent-governance";
 
 interface NavItem {
   id: ViewId;
@@ -25,6 +26,7 @@ const NAV: NavItem[] = [
   { id: "policy-console", label: "Policy Console", icon: "§", hint: "Rules & matches" },
   { id: "simulation-lab", label: "Simulation Lab", icon: "△", hint: "What-if testing" },
   { id: "runtime-events", label: "Runtime Events", icon: "⟳", hint: "Agentic event feed" },
+  { id: "agent-governance", label: "Agent Governance", icon: "⬡", hint: "Identity & permissions" },
   { id: "connectors", label: "Connectors", icon: "⇆", hint: "Integration shape" },
   { id: "audit-log", label: "Audit Log", icon: "≡", hint: "Decision ledger" },
   { id: "byok-settings", label: "BYOK Settings", icon: "⚙", hint: "AI provider" },

@@ -6,6 +6,7 @@ export interface DeepLinkState {
   event?: string;
   scenario?: string;
   policy?: string;
+  agent?: string; // Phase 3C: agent-governance deep link
 }
 
 export function parseDeepLink(search: string): DeepLinkState {
@@ -19,6 +20,7 @@ export function parseDeepLink(search: string): DeepLinkState {
       event: u.get("event") ?? undefined,
       scenario: u.get("scenario") ?? undefined,
       policy: u.get("policy") ?? undefined,
+      agent: u.get("agent") ?? undefined,
     };
   } catch {
     return {};
@@ -33,6 +35,7 @@ export function buildDeepLink(state: DeepLinkState): string {
   if (state.event) u.set("event", state.event);
   if (state.scenario) u.set("scenario", state.scenario);
   if (state.policy) u.set("policy", state.policy);
+  if (state.agent) u.set("agent", state.agent);
   const q = u.toString();
   const base = `${window.location.origin}${window.location.pathname}`;
   return q ? `${base}?${q}` : base;

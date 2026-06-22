@@ -10,6 +10,7 @@ import {
   seedCasesFromScenarios,
 } from "./cases";
 import { LedgerEvent, createEvent } from "./decisionLedger";
+import type { EvidenceCategory, EvidenceRequestStatus, AssignmentHistoryEntry, QualityMarker } from "./types";
 
 const LS_CASES = "trustguard.cases.v1";
 const LS_LEDGER = "trustguard.ledger.v1";
@@ -131,6 +132,16 @@ export interface CaseActions {
     reviewerOutcome: ReviewerOutcome,
     opts?: { conditions?: string[]; rationale?: string; who?: string },
   ) => void;
+  // Phase 3B
+  addEvidenceRequest: (caseId: string, category: EvidenceCategory, note?: string, who?: string) => void;
+  updateEvidenceRequest: (
+    caseId: string,
+    requestId: string,
+    status: EvidenceRequestStatus,
+    note?: string,
+    who?: string,
+  ) => void;
+  setQualityMarker: (caseId: string, marker: QualityMarker, who?: string) => void;
 }
 
 const DEFAULT_OPERATOR = "Amit";
@@ -163,7 +174,17 @@ export function useCaseStore() {
       if (!before) return;
       const prev = before.status;
       const next: CaseStatus = prev === "New" ? "In Review" : prev;
-      updateCase(caseId, { owner: who, status: next });
+      const newEntry: AssignmentHistoryEntry = {
+        ownerId: who.toLowerCase().replace(/\s+/g, "_"),
+        ownerName: who,
+        assignedAt: new Date().toISOString(),
+        source: "manual",
+      };
+      updateCase(caseId, {
+        owner: who,
+        status: next,
+        assignmentHistory: [...(before.assignmentHistory ?? []), newEntry],
+      });
       appendEvent(
         createEvent(caseId, who, "assign", `Assigned to ${who}`, {
           previousStatus: prev,
@@ -222,6 +243,71 @@ export function useCaseStore() {
       updateCase(caseId, { status: newStatus, owner: who });
       appendEvent(ev);
       appendOutcome(outcome);
+      persist();
+      emit();
+    },
+
+    // ─── Phase 3B actions ──────────────────────────────────────────────────────
+
+    addEvidenceRequest: (caseId, category, note, who = DEFAULT_OPERATOR) => {
+      const before = state.cases.find((c) => c.caseId === caseId);
+      if (!before) return;
+      const newReq = {
+        id: uid("er"),
+        category,
+        status: "requested" as EvidenceRequestStatus,
+        requestedAt: new Date().toISOString(),
+        note: note?.trim() || undefined,
+      };
+      updateCase(caseId, {
+        evidenceRequests: [...(before.evidenceRequests ?? []), newReq],
+      });
+      appendEvent(
+        createEvent(caseId, who, "evidence_requested", `Evidence requested: ${category.replace(/_/g, " ")}`, {
+          note: note?.trim() || undefined,
+        }),
+      );
+      persist();
+      emit();
+    },
+
+    updateEvidenceRequest: (caseId, requestId, status, note, who = DEFAULT_OPERATOR) => {
+      const before = state.cases.find((c) => c.caseId === caseId);
+      if (!before) return;
+      const updated = (before.evidenceRequests ?? []).map((r) =>
+        r.id === requestId
+          ? { ...r, status, updatedAt: new Date().toISOString(), ...(note ? { note: note.trim() } : {}) }
+          : r,
+      );
+      updateCase(caseId, { evidenceRequests: updated });
+      const actionMap: Record<EvidenceRequestStatus, string> = {
+        requested: "evidence_requested",
+        received: "evidence_received",
+        insufficient: "evidence_insufficient",
+        accepted: "evidence_accepted",
+      };
+      const labelMap: Record<EvidenceRequestStatus, string> = {
+        requested: "Evidence re-requested",
+        received: "Evidence received",
+        insufficient: "Evidence marked insufficient",
+        accepted: "Evidence accepted",
+      };
+      appendEvent(
+        createEvent(caseId, who, actionMap[status], labelMap[status], {
+          note: note?.trim() || undefined,
+        }),
+      );
+      persist();
+      emit();
+    },
+
+    setQualityMarker: (caseId, marker, who = DEFAULT_OPERATOR) => {
+      const before = state.cases.find((c) => c.caseId === caseId);
+      if (!before) return;
+      updateCase(caseId, { qualityMarker: marker });
+      appendEvent(
+        createEvent(caseId, who, "quality_marker_set", `Quality marker → ${marker.replace(/_/g, " ")}`, {}),
+      );
       persist();
       emit();
     },

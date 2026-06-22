@@ -2,15 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  getEventLifecycle,
+  getLiveStreamEntries,
   getRuntimeEvents,
   getRuntimeEventDetail,
+  LIFECYCLE_STATUS_COLORS,
   RUNTIME_STATUS_COLORS,
+  type LiveStreamEntry,
   type RuntimeEvent,
   type RuntimeEventStatus,
 } from "@/lib/runtimeEvents";
 import { DECISION_COLORS } from "@/lib/cases";
+import { getAgentById } from "@/lib/agentRegistry";
 import { ProductionWarningBanner } from "@/components/EnvironmentSelector";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import AgentPermissionCheck from "@/components/AgentPermissionCheck";
 
 const STATUS_FILTERS: ("All" | RuntimeEventStatus)[] = [
   "All",
@@ -55,6 +61,10 @@ export default function RuntimeEventsView({
   return (
     <div className="flex flex-col gap-4">
       <ProductionWarningBanner />
+      <p className="text-xs italic text-[var(--ink-2)] -mt-1">
+        Allowed actions proceed; restricted actions require policy-safe alternatives.
+      </p>
+      <LiveOperationalStream />
 
       <section className="glass rounded-xl p-5">
         <div className="flex items-baseline justify-between mb-1 flex-wrap gap-3">
@@ -124,6 +134,61 @@ export default function RuntimeEventsView({
                     <td className="py-2.5 pr-3 text-[12px] text-[var(--ink-1)]">
                       <div>{e.sourceAgent}</div>
                       <div className="text-[10px] text-[var(--ink-2)]">{e.sourceSystem}</div>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {e.sourceAgentId && (() => {
+                          const regAgent = getAgentById(e.sourceAgentId);
+                          return regAgent ? (
+                            <span
+                              className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                              style={{
+                                color:
+                                  regAgent.trustTier === "Low" ? "#D97448"
+                                  : regAgent.trustTier === "Medium" ? "#C9A36B"
+                                  : regAgent.trustTier === "High" ? "#6FB089"
+                                  : "#C7B8DC",
+                                background:
+                                  regAgent.trustTier === "Low" ? "#D9744818"
+                                  : regAgent.trustTier === "Medium" ? "#C9A36B18"
+                                  : regAgent.trustTier === "High" ? "#6FB08918"
+                                  : "#C7B8DC18",
+                                border: `1px solid ${
+                                  regAgent.trustTier === "Low" ? "#D9744855"
+                                  : regAgent.trustTier === "Medium" ? "#C9A36B55"
+                                  : regAgent.trustTier === "High" ? "#6FB08955"
+                                  : "#C7B8DC55"
+                                }`,
+                              }}
+                            >
+                              {regAgent.trustTier} trust
+                            </span>
+                          ) : null;
+                        })()}
+                        {e.actionSensitivity && (
+                          <span
+                            className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                            style={{
+                              color:
+                                e.actionSensitivity === "Low" ? "#6FB089"
+                                : e.actionSensitivity === "Medium" ? "#C9A36B"
+                                : e.actionSensitivity === "High" ? "#D97448"
+                                : "#B83A3A",
+                              background:
+                                e.actionSensitivity === "Low" ? "#6FB08918"
+                                : e.actionSensitivity === "Medium" ? "#C9A36B18"
+                                : e.actionSensitivity === "High" ? "#D9744818"
+                                : "#B83A3A18",
+                              border: `1px solid ${
+                                e.actionSensitivity === "Low" ? "#6FB08955"
+                                : e.actionSensitivity === "Medium" ? "#C9A36B55"
+                                : e.actionSensitivity === "High" ? "#D9744855"
+                                : "#B83A3A55"
+                              }`,
+                            }}
+                          >
+                            {e.actionSensitivity} sensitivity
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="py-2.5 pr-3 text-[12px]">
                       <div>{e.advertiser}</div>
@@ -352,6 +417,24 @@ function EventDetailDrawer({
             />
           </div>
 
+          {/* Phase 3C: Source Agent identity + Permission Check */}
+          {event.sourceAgentId && (
+            <Section title="Source agent identity &amp; permission">
+              <AgentPermissionCheck
+                agentId={event.sourceAgentId}
+                requestedAction={event.requestedPermission ?? event.requestedAction}
+                guardianDecision={
+                  detail?.guardian?.decision ?? undefined
+                }
+                sourceSystem={event.sourceSystem}
+                actionSensitivity={event.actionSensitivity}
+                guardianRequired={event.guardianRequired}
+              />
+            </Section>
+          )}
+
+          <EventLifecycleTimeline event={event} />
+
           <Section title="Proposed action">
             <div className="text-sm text-[var(--ink-0)]">{event.requestedAction}</div>
           </Section>
@@ -546,5 +629,175 @@ function ListBox({ title, items, color }: { title: string; items: string[]; colo
         ))}
       </ul>
     </div>
+  );
+}
+
+
+function LiveOperationalStream() {
+  const allEntries = useMemo(() => getLiveStreamEntries(), []);
+  const POOL_SIZE = allEntries.length;
+  const [visibleCount] = useState(8);
+  const [paused, setPaused] = useState(false);
+  const [offset, setOffset] = useState(0);
+
+  // 8-second cycle - just shifts which seeded entries are shown (no network calls)
+  useEffect(() => {
+    if (paused) return;
+    const id = setInterval(() => {
+      setOffset((o) => (o + 1) % Math.max(1, POOL_SIZE - visibleCount + 1));
+    }, 8000);
+    return () => clearInterval(id);
+  }, [paused, POOL_SIZE, visibleCount]);
+
+  const visible = useMemo(
+    () => allEntries.slice(offset, offset + visibleCount),
+    [allEntries, offset, visibleCount],
+  );
+
+  function fmt(iso: string) {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch {
+      return iso;
+    }
+  }
+
+  function simulateNext() {
+    setOffset((o) => (o + 1) % Math.max(1, POOL_SIZE - visibleCount + 1));
+  }
+
+  return (
+    <section
+      className="glass rounded-xl overflow-hidden"
+      style={{ borderColor: "rgba(201,163,107,0.18)" }}
+    >
+      <div
+        className="px-4 py-2.5 flex items-center justify-between border-b"
+        style={{ borderColor: "var(--border)", background: "rgba(0,0,0,0.25)" }}
+      >
+        <div>
+          <span className="text-[11px] uppercase tracking-wider text-[var(--ink-2)]">
+            Live Operational Stream
+          </span>
+          <span
+            className="ml-2 text-[9px] px-1.5 py-0.5 rounded-full"
+            style={{ background: paused ? "#7F776B22" : "#6FB08922", color: paused ? "#7F776B" : "#6FB089", border: `1px solid ${paused ? "#7F776B44" : "#6FB08944"}` }}
+          >
+            {paused ? "paused" : "live"}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={simulateNext}
+            className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-[var(--ink-2)] hover:text-[var(--ink-1)] transition"
+          >
+            Simulate next
+          </button>
+          <button
+            onClick={() => setPaused((p) => !p)}
+            className="text-[10px] px-2 py-0.5 rounded border border-white/10 text-[var(--ink-2)] hover:text-[var(--ink-1)] transition"
+          >
+            {paused ? "Resume" : "Pause"}
+          </button>
+        </div>
+      </div>
+      <div className="divide-y divide-white/[0.04] max-h-52 overflow-y-auto">
+        {visible.map((entry: LiveStreamEntry) => (
+          <div key={entry.id} className="flex items-start gap-3 px-4 py-2 hover:bg-white/[0.02] transition">
+            <span
+              className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+              style={{ background: entry.dotColor }}
+            />
+            <span className="text-[10px] text-[var(--ink-2)] w-20 shrink-0 tabular-nums pt-px">
+              {fmt(entry.timestamp)}
+            </span>
+            <span className="text-[11px] text-[var(--ink-1)] min-w-0 flex-1">
+              <span className="font-medium">{entry.label}</span>
+              {entry.detail && (
+                <span className="text-[var(--ink-2)]"> - {entry.detail}</span>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EventLifecycleTimeline({ event }: { event: RuntimeEvent }) {
+  const steps = useMemo(() => getEventLifecycle(event), [event]);
+
+  function fmt(iso: string) {
+    try {
+      return new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    } catch {
+      return iso;
+    }
+  }
+
+  return (
+    <section>
+      <div className="section-title mb-2">Event lifecycle</div>
+      <div
+        className="rounded-lg px-4 py-3"
+        style={{ background: "var(--bg-2)", border: "1px solid var(--border)" }}
+      >
+        <ol className="relative space-y-0">
+          {steps.map((step, idx) => {
+            const color = LIFECYCLE_STATUS_COLORS[step.status];
+            const isLast = idx === steps.length - 1;
+            return (
+              <li key={step.step} className="relative flex gap-4 pb-4">
+                {!isLast && (
+                  <div
+                    className="absolute left-[7px] top-4 bottom-0 w-px"
+                    style={{ background: step.isDone ? color + "40" : "var(--border)" }}
+                  />
+                )}
+                <div
+                  className="mt-0.5 w-3.5 h-3.5 rounded-full shrink-0 flex items-center justify-center border"
+                  style={{
+                    borderColor: step.isDone ? color : "var(--border)",
+                    background: step.isDone ? color + "25" : "var(--bg-2)",
+                  }}
+                >
+                  {step.isDone && (
+                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span
+                      className="text-[11px] font-medium"
+                      style={{ color: step.isDone ? "var(--ink-0)" : "var(--ink-2)" }}
+                    >
+                      {step.label}
+                    </span>
+                    <span
+                      className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded-full"
+                      style={{
+                        color: step.isDone ? color : "var(--ink-2)",
+                        background: step.isDone ? color + "18" : "transparent",
+                        border: `1px solid ${step.isDone ? color + "55" : "var(--border)"}`,
+                      }}
+                    >
+                      {step.status.replace(/_/g, " ")}
+                    </span>
+                    <span className="text-[10px] text-[var(--ink-2)] tabular-nums ml-auto">
+                      {fmt(step.timestamp)}
+                    </span>
+                  </div>
+                  {step.detail && (
+                    <div className="text-[10px] text-[var(--ink-2)] mt-0.5 leading-relaxed">
+                      {step.detail}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </section>
   );
 }

@@ -24,6 +24,7 @@ import RuntimeEventsView from "@/components/views/RuntimeEventsView";
 import ConnectorsView from "@/components/views/ConnectorsView";
 import AuditLogView from "@/components/views/AuditLogView";
 import BYOKSettingsView from "@/components/views/BYOKSettingsView";
+import AgentGovernanceView from "@/components/views/AgentGovernanceView";
 
 const DEFAULT_BYOK: BYOKConfig = {
   mode: "demo",
@@ -54,6 +55,7 @@ const VALID_VIEWS: ViewId[] = [
   "connectors",
   "audit-log",
   "byok-settings",
+  "agent-governance",
 ];
 
 function App() {
@@ -68,6 +70,7 @@ function App() {
   const [initialCaseId, setInitialCaseId] = useState<string | null>(null);
   const [initialEventId, setInitialEventId] = useState<string | null>(null);
   const [initialScenarioId, setInitialScenarioId] = useState<string | null>(null);
+  const [initialAgentId, setInitialAgentId] = useState<string | null>(null);
   const personaInitOverride = useRef(false);
 
   // Parse deep link on first mount — overrides persona's focusView.
@@ -82,6 +85,7 @@ function App() {
     if (parsed.case) setInitialCaseId(parsed.case);
     if (parsed.event) setInitialEventId(parsed.event);
     if (parsed.scenario) setInitialScenarioId(parsed.scenario);
+    if (parsed.agent) setInitialAgentId(parsed.agent);
   }, []);
 
   // Keep URL in sync with current view (without polluting history).
@@ -93,6 +97,7 @@ function App() {
     if (view === "review-queue" && params.case) next.case = params.case;
     if (view === "runtime-events" && params.event) next.event = params.event;
     if (view === "control-plane" && params.scenario) next.scenario = params.scenario;
+    if (view === "agent-governance" && params.agent) next.agent = params.agent;
     syncDeepLink(next);
   }, [view]);
 
@@ -146,6 +151,7 @@ function App() {
     if (link.case) setInitialCaseId(link.case);
     if (link.event) setInitialEventId(link.event);
     if (link.scenario) setInitialScenarioId(link.scenario);
+    if (link.agent) setInitialAgentId(link.agent);
     if (link.view && VALID_VIEWS.includes(link.view)) {
       setView(link.view);
       syncDeepLink(link);
@@ -219,6 +225,12 @@ function App() {
             errorMessage={aiError}
             onTest={testByok}
             testing={aiLoading}
+          />
+        )}
+        {view === "agent-governance" && (
+          <AgentGovernanceView
+            initialAgentId={initialAgentId}
+            onClearInitialAgent={() => setInitialAgentId(null)}
           />
         )}
 

@@ -6,6 +6,8 @@ import {
   DECISION_COLORS,
   PRIORITY_COLORS,
   STATUS_COLORS,
+  QUALITY_MARKER_COLORS,
+  QUALITY_MARKER_LABELS,
   ReviewerOutcome,
   getScenarioForCase,
 } from "@/lib/cases";
@@ -17,8 +19,16 @@ import WorkerFindings from "@/components/WorkerFindings";
 import ActionsColumns from "@/components/ActionsColumns";
 import AuditTrail from "@/components/AuditTrail";
 import EvidencePack from "@/components/EvidencePack";
+import InvestigationTimeline from "@/components/InvestigationTimeline";
+import AssignmentHistoryPanel from "@/components/AssignmentHistoryPanel";
+import EvidenceRequestsPanel from "@/components/EvidenceRequestsPanel";
+import AppealReviewPath from "@/components/AppealReviewPath";
 import { buildEvidencePack } from "@/lib/evidence";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import { computeSlaState, SLA_STATE_COLORS, SLA_STATE_LABELS } from "@/lib/sla";
+import { getRuntimeEvents } from "@/lib/runtimeEvents";
+import AgentPermissionCheck from "@/components/AgentPermissionCheck";
+import type { QualityMarker } from "@/lib/types";
 
 function fmtTime(iso: string) {
   try {
@@ -71,6 +81,7 @@ export default function CaseDetailDrawer({
   const { cases, ledger, outcomes, actions } = useCaseStore();
   const [note, setNote] = useState("");
   const [outcomeRationale, setOutcomeRationale] = useState("");
+  const [showQaDropdown, setShowQaDropdown] = useState(false);
 
   useEffect(() => {
     if (!caseId) return;
@@ -86,13 +97,26 @@ export default function CaseDetailDrawer({
     return outcomes.find((o) => o.caseId === caseId) ?? null;
   }, [outcomes, caseId]);
 
+  // Phase 3C: find matching runtime event to get agent identity
+  // Must be before early returns to satisfy Rules of Hooks.
+  const matchingEvent = useMemo(() => {
+    if (!caseId) return null;
+    const c = cases.find((x) => x.caseId === caseId);
+    if (!c) return null;
+    const events = getRuntimeEvents();
+    return events.find((e) => e.linkedScenarioId === c.scenarioId) ?? null;
+  }, [caseId, cases]);
+
   if (!caseId) return null;
   const c = cases.find((x) => x.caseId === caseId);
   if (!c) return null;
 
   const { scenario, orchestrator, guardian } = getScenarioForCase(c);
   const caseEvents = ledger.filter((e) => e.caseId === c.caseId);
+  const caseOutcomes = outcomes.filter((o) => o.caseId === c.caseId);
   const evidencePack = buildEvidencePack(scenario, guardian);
+  const slaState = c.slaState ?? (c.slaDueAt ? computeSlaState(c.slaDueAt) : "on_track");
+  const slaStateColor = SLA_STATE_COLORS[slaState];
 
   function recordOutcome(outcome: ReviewerOutcome) {
     if (!c) return;
@@ -133,6 +157,15 @@ export default function CaseDetailDrawer({
                 <span
                   className="pill"
                   style={{
+                    borderColor: slaStateColor + "80",
+                    color: slaStateColor,
+                  }}
+                >
+                  {SLA_STATE_LABELS[slaState]}
+                </span>
+                <span
+                  className="pill"
+                  style={{
                     borderColor: STATUS_COLORS[c.status] + "80",
                     color: STATUS_COLORS[c.status],
                   }}
@@ -148,6 +181,19 @@ export default function CaseDetailDrawer({
                 >
                   Guardian: {c.guardianDecision}
                 </span>
+                {/* Quality marker pill */}
+                <button
+                  className="pill"
+                  title="Click to change quality marker"
+                  onClick={() => setShowQaDropdown((v) => !v)}
+                  style={{
+                    borderColor: QUALITY_MARKER_COLORS[c.qualityMarker ?? "not_reviewed"] + "80",
+                    color: QUALITY_MARKER_COLORS[c.qualityMarker ?? "not_reviewed"],
+                    cursor: "pointer",
+                  }}
+                >
+                  QM: {QUALITY_MARKER_LABELS[c.qualityMarker ?? "not_reviewed"]}
+                </button>
                 <span className="pill" style={{ borderColor: "rgba(255,255,255,0.1)" }}>
                   Owner: {c.owner}
                 </span>
@@ -190,14 +236,80 @@ export default function CaseDetailDrawer({
             </span>
           </div>
 
-          {/* Next best action */}
+          {/* Next best action + quality marker dropdown */}
           <div className="glass-strong rounded-xl p-4">
-            <div className="text-[10px] uppercase tracking-wider text-[var(--ink-2)]">Next best action</div>
-            <div className="text-sm mt-1">{c.nextBestAction}</div>
+            <div className="flex items-start justify-between gap-4 flex-wrap">
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-[var(--ink-2)]">Next best action</div>
+                <div className="text-sm mt-1">{c.nextBestAction}</div>
+              </div>
+              <div className="shrink-0">
+                {showQaDropdown ? (
+                  <div className="flex flex-col gap-1">
+                    <div className="text-[10px] uppercase tracking-wider text-[var(--ink-2)] mb-1">
+                      Set quality marker
+                    </div>
+                    {(["not_reviewed", "needs_qa", "qa_passed", "policy_calibration_needed"] as QualityMarker[]).map((m) => (
+                      <button
+                        key={m}
+                        onClick={() => {
+                          actions.setQualityMarker(c.caseId, m);
+                          setShowQaDropdown(false);
+                        }}
+                        className="pill text-[10px] text-left"
+                        style={{
+                          borderColor: QUALITY_MARKER_COLORS[m] + "60",
+                          color: QUALITY_MARKER_COLORS[m],
+                          background: c.qualityMarker === m ? QUALITY_MARKER_COLORS[m] + "15" : "transparent",
+                        }}
+                      >
+                        {m === c.qualityMarker ? "✓ " : ""}{QUALITY_MARKER_LABELS[m]}
+                      </button>
+                    ))}
+                    <button
+                      onClick={() => setShowQaDropdown(false)}
+                      className="pill text-[10px] mt-1"
+                      style={{ borderColor: "rgba(255,255,255,0.1)", color: "var(--ink-2)" }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
+
+          {/* Assignment History */}
+          <AssignmentHistoryPanel
+            history={c.assignmentHistory ?? []}
+            currentOwner={c.owner}
+          />
+
+          {/* Investigation Timeline */}
+          <InvestigationTimeline
+            c={c}
+            guardian={guardian}
+            caseEvents={caseEvents}
+            outcomes={caseOutcomes}
+          />
 
           {/* Interception strip */}
           <InterceptionMoment scenario={scenario} guardian={guardian} />
+
+          {/* Phase 3C: Agent Permission Check */}
+          {matchingEvent?.sourceAgentId && (
+            <section className="glass rounded-xl p-5">
+              <div className="text-sm font-semibold mb-3">Agent permission check</div>
+              <AgentPermissionCheck
+                agentId={matchingEvent.sourceAgentId}
+                requestedAction={matchingEvent.requestedPermission ?? c.requestedAction}
+                guardianDecision={c.guardianDecision}
+                sourceSystem={matchingEvent.sourceSystem}
+                actionSensitivity={matchingEvent.actionSensitivity}
+                guardianRequired={matchingEvent.guardianRequired}
+              />
+            </section>
+          )}
 
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-1">
@@ -216,6 +328,20 @@ export default function CaseDetailDrawer({
           <WorkerFindings findings={scenario.workerFindings} />
 
           <EvidencePack sections={evidencePack} />
+
+          {/* Evidence Requests Panel */}
+          <EvidenceRequestsPanel
+            caseId={c.caseId}
+            evidenceRequests={c.evidenceRequests ?? []}
+            actions={actions}
+          />
+
+          {/* Appeal & Review Path */}
+          <AppealReviewPath
+            guardianDecision={c.guardianDecision}
+            vertical={c.vertical}
+            caseOutcomes={caseOutcomes}
+          />
 
           {/* Outcome panel */}
           <section className="glass rounded-xl p-5">

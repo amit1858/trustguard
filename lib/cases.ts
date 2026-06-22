@@ -1,7 +1,18 @@
 import { SCENARIOS, getScenario } from "./scenarios";
 import { runOrchestrator } from "./orchestratorEngine";
 import { evaluateGuardian } from "./guardianEngine";
-import type { GuardianDecision, GuardianOutput, RiskLevel, Scenario } from "./types";
+import { SLA_DUE_AT_POOL, computeSlaState } from "./sla";
+import type { SlaState } from "./sla";
+import type {
+  GuardianDecision,
+  GuardianOutput,
+  RiskLevel,
+  Scenario,
+  EvidenceCategory,
+  EvidenceRequest,
+  AssignmentHistoryEntry,
+  QualityMarker,
+} from "./types";
 
 export type CaseStatus =
   | "New"
@@ -56,6 +67,8 @@ export interface CaseRecord {
   riskLevel: RiskLevel;
   priority: CasePriority;
   sla: string; // e.g. "4h", "24h"
+  slaDueAt?: string;
+  slaState?: SlaState;
   owner: string; // "Unassigned" or username
   status: CaseStatus;
   createdAt: string;
@@ -64,6 +77,10 @@ export interface CaseRecord {
   matchedPolicies: { policyId: string; title: string }[];
   nextBestAction: string;
   notes: string[]; // reviewer notes
+  // Phase 3B
+  assignmentHistory: AssignmentHistoryEntry[];
+  evidenceRequests: EvidenceRequest[];
+  qualityMarker: QualityMarker;
 }
 
 function priorityFromDecision(decision: GuardianDecision, risk: number): CasePriority {
@@ -116,6 +133,124 @@ interface SeedRow {
   guardian: GuardianOutput;
 }
 
+// ── Phase 3B: per-scenario seed extras ───────────────────────────────────────
+
+interface SeedExtras {
+  owner?: string;
+  status?: CaseStatus;
+  assignmentHistory?: AssignmentHistoryEntry[];
+  evidenceRequests?: EvidenceRequest[];
+  qualityMarker?: QualityMarker;
+}
+
+const SEED_EXTRAS: Record<string, SeedExtras> = {
+  misleading_finance: {
+    owner: "Sarah Chen",
+    status: "In Review",
+    assignmentHistory: [
+      {
+        ownerId: "system",
+        ownerName: "System (Auto-triage)",
+        assignedAt: "2026-06-21T06:00:00Z",
+        source: "queue_rule",
+      },
+      {
+        ownerId: "sarah_chen",
+        ownerName: "Sarah Chen",
+        assignedAt: "2026-06-21T08:30:00Z",
+        source: "manual",
+      },
+    ],
+    evidenceRequests: [
+      {
+        id: "er_mf_1",
+        category: "business_verification" as EvidenceCategory,
+        status: "accepted",
+        requestedAt: "2026-06-21T08:45:00Z",
+        updatedAt: "2026-06-21T10:00:00Z",
+        note: "Business registration verified — GST confirmed.",
+      },
+      {
+        id: "er_mf_2",
+        category: "claim_substantiation" as EvidenceCategory,
+        status: "insufficient",
+        requestedAt: "2026-06-21T08:50:00Z",
+        updatedAt: "2026-06-21T11:00:00Z",
+        note: "Advertiser provided a blog post, not a peer-reviewed study. Rejected.",
+      },
+      {
+        id: "er_mf_3",
+        category: "landing_page_disclosure" as EvidenceCategory,
+        status: "requested",
+        requestedAt: "2026-06-21T09:00:00Z",
+        note: "APR and lender identity must be disclosed above the fold.",
+      },
+    ],
+    qualityMarker: "needs_qa",
+  },
+  suspicious_budget: {
+    owner: "Marcus Lee",
+    status: "In Review",
+    assignmentHistory: [
+      {
+        ownerId: "marcus_lee",
+        ownerName: "Marcus Lee",
+        assignedAt: "2026-06-21T07:00:00Z",
+        source: "queue_rule",
+      },
+    ],
+    evidenceRequests: [
+      {
+        id: "er_sb_1",
+        category: "payment_instrument_proof" as EvidenceCategory,
+        status: "received",
+        requestedAt: "2026-06-21T07:15:00Z",
+        updatedAt: "2026-06-21T09:30:00Z",
+        note: "Card verification documents received — pending specialist review.",
+      },
+      {
+        id: "er_sb_2",
+        category: "business_verification" as EvidenceCategory,
+        status: "requested",
+        requestedAt: "2026-06-21T07:20:00Z",
+        note: "Verify current linked account relationships and ownership structure.",
+      },
+    ],
+    qualityMarker: "policy_calibration_needed",
+  },
+  risky_ai_targeting: {
+    qualityMarker: "qa_passed",
+  },
+  appeal_review: {
+    assignmentHistory: [
+      {
+        ownerId: "system",
+        ownerName: "System (Auto-triage)",
+        assignedAt: "2026-06-21T05:00:00Z",
+        source: "system",
+      },
+    ],
+    evidenceRequests: [
+      {
+        id: "er_ar_1",
+        category: "appeal_explanation" as EvidenceCategory,
+        status: "requested",
+        requestedAt: "2026-06-21T05:10:00Z",
+        note: "Advertiser must explain deviation from health claim policy and proposed remedy.",
+      },
+      {
+        id: "er_ar_2",
+        category: "claim_substantiation" as EvidenceCategory,
+        status: "received",
+        requestedAt: "2026-06-21T05:15:00Z",
+        updatedAt: "2026-06-21T08:00:00Z",
+        note: "Study link received — pending policy specialist review of methodology.",
+      },
+    ],
+    qualityMarker: "not_reviewed",
+  },
+};
+
 function evaluateAll(): SeedRow[] {
   return SCENARIOS.map((s) => ({
     scenario: s,
@@ -131,8 +266,10 @@ export function seedCasesFromScenarios(): CaseRecord[] {
   const now = new Date().toISOString();
   return evaluateAll()
     .filter(({ guardian }) => ["ESCALATE", "BLOCK", "RESTRICT"].includes(guardian.decision))
-    .map(({ scenario, guardian }): CaseRecord => {
+    .map(({ scenario, guardian }, idx): CaseRecord => {
       const priority = priorityFromDecision(guardian.decision, guardian.riskScore);
+      const slaDueAt = SLA_DUE_AT_POOL[idx % 4];
+      const extras = SEED_EXTRAS[scenario.id] ?? {};
       return {
         caseId: caseIdFor(scenario),
         scenarioId: scenario.id,
@@ -146,14 +283,19 @@ export function seedCasesFromScenarios(): CaseRecord[] {
         riskLevel: guardian.riskLevel,
         priority,
         sla: slaFromPriority(priority),
-        owner: "Unassigned",
-        status: "New",
+        slaDueAt,
+        slaState: computeSlaState(slaDueAt),
+        owner: extras.owner ?? "Unassigned",
+        status: extras.status ?? "New",
         createdAt: now,
         updatedAt: now,
         reasonCodes: guardian.reasonCodes,
         matchedPolicies: guardian.matchedPolicies.map((p) => ({ policyId: p.policyId, title: p.title })),
         nextBestAction: nextBestAction(guardian.decision),
         notes: [],
+        assignmentHistory: extras.assignmentHistory ?? [],
+        evidenceRequests: extras.evidenceRequests ?? [],
+        qualityMarker: extras.qualityMarker ?? "not_reviewed",
       };
     })
     .sort((a, b) => b.riskScore - a.riskScore);
@@ -190,4 +332,43 @@ export const DECISION_COLORS: Record<GuardianDecision, string> = {
   RESTRICT: "#9B89B8",
   ESCALATE: "#D97448",
   BLOCK: "#B83A3A",
+};
+
+// ─── Phase 3B: Quality Marker & Evidence Request constants ───────────────────
+
+export const QUALITY_MARKER_LABELS: Record<QualityMarker, string> = {
+  not_reviewed: "Not Reviewed",
+  needs_qa: "Needs QA",
+  qa_passed: "QA Passed",
+  policy_calibration_needed: "Policy Cal.",
+};
+
+export const QUALITY_MARKER_COLORS: Record<QualityMarker, string> = {
+  not_reviewed: "#7F776B",
+  needs_qa: "#F59E2E",
+  qa_passed: "#6FB089",
+  policy_calibration_needed: "#D97448",
+};
+
+export const EVIDENCE_CATEGORY_LABELS: Record<EvidenceCategory, string> = {
+  business_verification: "Business Verification",
+  certification_document: "Certification Document",
+  landing_page_disclosure: "Landing Page Disclosure",
+  claim_substantiation: "Claim Substantiation",
+  payment_instrument_proof: "Payment Instrument Proof",
+  appeal_explanation: "Appeal Explanation",
+};
+
+export const EVIDENCE_REQUEST_STATUS_LABELS: Record<string, string> = {
+  requested: "Requested",
+  received: "Received",
+  insufficient: "Insufficient",
+  accepted: "Accepted",
+};
+
+export const EVIDENCE_REQUEST_STATUS_COLORS: Record<string, string> = {
+  requested: "#F59E2E",
+  received: "#8FA1B3",
+  insufficient: "#B83A3A",
+  accepted: "#6FB089",
 };
