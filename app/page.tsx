@@ -1,16 +1,20 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { BYOKConfig } from "@/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { BYOKConfig, GuardianOutput } from "@/lib/types";
 import { PersonaProvider, usePersona } from "@/lib/persona";
 import { EnvProvider } from "@/lib/environment";
 import { ToastProvider } from "@/components/Toast";
 import { parseDeepLink, syncDeepLink, type DeepLinkState } from "@/lib/deepLinks";
+import { SCENARIOS, getScenario } from "@/lib/scenarios";
+import { runOrchestrator } from "@/lib/orchestratorEngine";
+import { evaluateGuardian } from "@/lib/guardianEngine";
 
 import Header from "@/components/Header";
 import AppShell, { type ViewId } from "@/components/AppShell";
 import BYOKControl, { type ByokStatus } from "@/components/BYOKControl";
 import WalkthroughButton from "@/components/WalkthroughButton";
+import WalkthroughModal from "@/components/WalkthroughModal";
 import PersonaSwitcher from "@/components/PersonaSwitcher";
 import EnvironmentSelector from "@/components/EnvironmentSelector";
 import ExecutiveDemoButton from "@/components/ExecutiveDemoButton";
@@ -71,7 +75,16 @@ function App() {
   const [initialEventId, setInitialEventId] = useState<string | null>(null);
   const [initialScenarioId, setInitialScenarioId] = useState<string | null>(null);
   const [initialAgentId, setInitialAgentId] = useState<string | null>(null);
+  const [activeScenarioId, setActiveScenarioId] = useState<string>(SCENARIOS[0].id);
   const personaInitOverride = useRef(false);
+
+  // Compute the walkthrough's scenario/guardian at the page level so the
+  // PresenterDrawer mounts globally and works on every view (not just Control Plane).
+  const walkthroughScenario = useMemo(() => getScenario(activeScenarioId), [activeScenarioId]);
+  const walkthroughGuardian: GuardianOutput = useMemo(() => {
+    const orchestrator = runOrchestrator(walkthroughScenario);
+    return evaluateGuardian(walkthroughScenario, orchestrator);
+  }, [walkthroughScenario]);
 
   // Parse deep link on first mount — overrides persona's focusView.
   useEffect(() => {
@@ -84,7 +97,12 @@ function App() {
     }
     if (parsed.case) setInitialCaseId(parsed.case);
     if (parsed.event) setInitialEventId(parsed.event);
-    if (parsed.scenario) setInitialScenarioId(parsed.scenario);
+    if (parsed.scenario) {
+      setInitialScenarioId(parsed.scenario);
+      if (SCENARIOS.some((s) => s.id === parsed.scenario)) {
+        setActiveScenarioId(parsed.scenario);
+      }
+    }
     if (parsed.agent) setInitialAgentId(parsed.agent);
   }, []);
 
@@ -189,13 +207,12 @@ function App() {
         {view === "control-plane" && (
           <ControlPlaneView
             byok={byok}
-            walkthroughOpen={walkthroughOpen}
-            setWalkthroughOpen={setWalkthroughOpen}
             onOpenReviewQueue={() => setView("review-queue")}
             onOpenPolicy={() => setView("policy-console")}
             onOpenRuntimeEvents={() => setView("runtime-events")}
             initialScenarioId={initialScenarioId}
             onClearInitialScenario={() => setInitialScenarioId(null)}
+            onActiveScenarioChange={setActiveScenarioId}
           />
         )}
 
@@ -239,6 +256,12 @@ function App() {
           Guardian decisions are immutable; operator actions add review outcomes only.
         </footer>
       </main>
+      <WalkthroughModal
+        open={walkthroughOpen}
+        onClose={() => setWalkthroughOpen(false)}
+        scenario={walkthroughScenario}
+        guardian={walkthroughGuardian}
+      />
     </AppShell>
   );
 }

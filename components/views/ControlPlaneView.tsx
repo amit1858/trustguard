@@ -18,7 +18,6 @@ import ActionsColumns from "@/components/ActionsColumns";
 import AuditTrail from "@/components/AuditTrail";
 import WhyItMatters from "@/components/WhyItMatters";
 import WhyTrustSafety from "@/components/WhyTrustSafety";
-import WalkthroughModal from "@/components/WalkthroughModal";
 import ExecutiveSummaryCard from "@/components/ExecutiveSummaryCard";
 import AudioOverviewCard from "@/components/AudioOverviewCard";
 import ControlPlaneMetrics from "@/components/ControlPlaneMetrics";
@@ -35,22 +34,20 @@ import { usePersona } from "@/lib/persona";
 
 export default function ControlPlaneView({
   byok,
-  walkthroughOpen,
-  setWalkthroughOpen,
   onOpenReviewQueue,
   onOpenPolicy,
   onOpenRuntimeEvents,
   initialScenarioId,
   onClearInitialScenario,
+  onActiveScenarioChange,
 }: {
   byok: BYOKConfig;
-  walkthroughOpen: boolean;
-  setWalkthroughOpen: (v: boolean) => void;
   onOpenReviewQueue: () => void;
   onOpenPolicy?: (id?: string) => void;
   onOpenRuntimeEvents?: () => void;
   initialScenarioId?: string | null;
   onClearInitialScenario?: () => void;
+  onActiveScenarioChange?: (id: string) => void;
 }) {
   const { meta: persona } = usePersona();
   const [scenarioId, setScenarioId] = useState(SCENARIOS[0].id);
@@ -69,7 +66,8 @@ export default function ControlPlaneView({
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset stale AI state when scenario changes
     setAiExplanation(undefined);
     setAiError(undefined);
-  }, [scenarioId]);
+    onActiveScenarioChange?.(scenarioId);
+  }, [scenarioId, onActiveScenarioChange]);
 
   // Deep-link: switch scenario when caller passes one in (e.g. from URL or Executive Demo).
   useEffect(() => {
@@ -234,13 +232,6 @@ export default function ControlPlaneView({
       <ReadinessPanel />
 
       <WhyItMatters />
-
-      <WalkthroughModal
-        open={walkthroughOpen}
-        onClose={() => setWalkthroughOpen(false)}
-        scenario={scenario}
-        guardian={guardian}
-      />
     </div>
   );
 }

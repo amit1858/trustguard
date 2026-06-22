@@ -8,7 +8,33 @@ for Ads Trust & Safety, where a **Guardian Agent** overlays an **Orchestrator Ag
 
 ---
 
-## Phase 3 â€” Operational Realism
+## Recommended Neha Demo Path
+
+The fastest way to walk a senior Ads Trust & Safety product leader through TrustGuard. Each
+step has a direct production deep-link.
+
+| # | Step | Production URL |
+|---|---|---|
+| 1 | **Control Plane** â€” executive metrics, audio overview, shadow-mode pilot recommendation | https://trustguard-ten.vercel.app/?view=control-plane |
+| 2 | **Runtime Events** â€” Live Operational Stream + event lifecycle + source agent identity + permission check | https://trustguard-ten.vercel.app/?view=runtime-events |
+| 3 | **Agent Governance** â€” agent registry, trust tiers, 5 governance rules ("Orchestrator cannot override Guardian") | https://trustguard-ten.vercel.app/?view=agent-governance |
+| 4 | **BrightFast Loans BLOCK** â€” Guardian decision, reason codes, matched policies, allowed vs blocked actions | https://trustguard-ten.vercel.app/?view=control-plane&scenario=misleading_finance |
+| 5 | **Review Queue** â€” TG-MISL-IND case (investigation timeline, evidence workflow, appeal path, audit trail) | https://trustguard-ten.vercel.app/?view=review-queue&case=TG-MISL-IND |
+| 6 | **Simulation Lab** â€” flip one input, watch the deterministic policy kernel change the decision | https://trustguard-ten.vercel.app/?view=simulation-lab |
+| 7 | **Connectors / Readiness** â€” mock-vs-production boundaries, integration path | https://trustguard-ten.vercel.app/?view=connectors |
+
+**Production:** https://trustguard-ten.vercel.app Â· **GitHub:** https://github.com/amit1858/trustguard Â·
+**Audio asset:** https://trustguard-ten.vercel.app/audio/trustguard-overview.m4a (6:12, AAC/m4a).
+
+**Two header demo entry points:**
+- **Executive Demo** opens the 7-step PresenterDrawer geared to leadership (product thesis â†’ runtime interception â†’ Orchestrator vs Guardian â†’ Guardian decision â†’ human review â†’ policy governance â†’ integration readiness).
+- **Start Demo Walkthrough** opens the scenario-driven PresenterDrawer for the currently-selected scenario. Works from every view.
+
+Close on: *"Shadow-mode pilot â€” financial-services campaign launch with misleading claim and missing certification."*
+
+---
+
+
 
 Phases 3A through 3D transform TrustGuard from a scenario simulator into a realistic operational control
 plane for an enterprise ads trust & safety team.
@@ -1083,7 +1109,7 @@ treating agent identity as a first-class governance surface.
 
 ---
 
-## Phase 3D — Executive Metrics and Operational Insights
+## Phase 3D ï¿½ Executive Metrics and Operational Insights
 
 Phase 3D adds a leadership-grade operational layer on top of the Control Plane, providing executive
 metrics, reviewer calibration signals, policy firing analysis, agent risk ranking, and strategic
@@ -1093,10 +1119,10 @@ operational insight narratives.
 
 | Component | Purpose |
 |---|---|
-| `lib/executiveMetrics.ts` | Central computation hub — all metrics derived deterministically from seeded scenarios, policies, agent registry, and runtime events |
+| `lib/executiveMetrics.ts` | Central computation hub ï¿½ all metrics derived deterministically from seeded scenarios, policies, agent registry, and runtime events |
 | `components/ExecutiveMetricsDashboard.tsx` | 4-column tile grid: 12 leadership KPIs including actions evaluated/allowed/restricted/escalated/blocked, human review rate, avg risk, top policy, highest-risk vertical/market, runtime coverage, risky actions prevented, reviewer agreement rate |
-| `components/CalibrationPanel.tsx` | Prototype calibration panel — potential FP/FN mocks, policy calibration count, reviewer disagreement deep-links. Clearly labelled as prototype simulation |
-| `components/PolicyPressurePanel.tsx` | Policy firing analysis — tabbed view: most firing, most review load, most associated with BLOCK, most associated with ESCALATE, zero-hit policies. Rows deep-link to Policy Console |
+| `components/CalibrationPanel.tsx` | Prototype calibration panel ï¿½ potential FP/FN mocks, policy calibration count, reviewer disagreement deep-links. Clearly labelled as prototype simulation |
+| `components/PolicyPressurePanel.tsx` | Policy firing analysis ï¿½ tabbed view: most firing, most review load, most associated with BLOCK, most associated with ESCALATE, zero-hit policies. Rows deep-link to Policy Console |
 | `components/AgentRiskLeaderboard.tsx` | Source agents ranked by interventions / blocked / escalation rate / avg risk. Trust tier pill per row. Each row deep-links to Agent Governance agent detail drawer |
 | `components/OperationalInsightCards.tsx` | Three deterministic narrative cards: most risky workflow, top intervention driver, best shadow-mode pilot candidate |
 
@@ -1104,17 +1130,17 @@ operational insight narratives.
 
 | Metric | Derivation |
 |---|---|
-| Actions evaluated | `SCENARIOS.length` — total Guardian evaluations in the seed dataset |
+| Actions evaluated | `SCENARIOS.length` ï¿½ total Guardian evaluations in the seed dataset |
 | Actions allowed | `byDecision.ALLOW + byDecision.ALLOW_WITH_CONDITIONS` |
 | Actions restricted | `byDecision.RESTRICT` |
 | Actions escalated | `byDecision.ESCALATE` |
 | Actions blocked | `byDecision.BLOCK` |
-| Human review rate | `humanReviewRequired=true` cases ÷ total evaluations × 100 |
+| Human review rate | `humanReviewRequired=true` cases ï¿½ total evaluations ï¿½ 100 |
 | Avg risk score | Mean Guardian risk score across all scenario evaluations |
 | Top policy triggered | Policy ID with highest hit count across all matched policies |
 | Highest risk vertical | Vertical with highest mean Guardian risk score |
 | Highest risk market | Market with highest mean Guardian risk score |
-| Runtime interception coverage | `evaluated_events ÷ total_events × 100` where "evaluated" = status ? "New" |
+| Runtime interception coverage | `evaluated_events ï¿½ total_events ï¿½ 100` where "evaluated" = status ? "New" |
 | Est. risky actions prevented | `BLOCK + ESCALATE` count (actions that would have proceeded without Guardian) |
 
 ### Reviewer agreement rate
@@ -1131,26 +1157,26 @@ advertiser provided substantiation) ? **75% agreement rate**.
 ### Calibration panel disclaimer
 
 The Calibration Panel is explicitly labelled:
-> "Prototype simulation — calibration metrics are deterministic mocks for demo."
+> "Prototype simulation ï¿½ calibration metrics are deterministic mocks for demo."
 
 Potential FP (2) and FN (1) counts are static, justified by scenario characteristics:
 - FP: regulated_missing_cert (conservative ALLOW_WITH_CONDITIONS on clean advertiser) + risky_ai_targeting (RESTRICT on historically-clean advertiser)
-- FN: clean_launch (ALLOW on Contoso Fitness — same vertical as the BrightFast BLOCK, different signals)
+- FN: clean_launch (ALLOW on Contoso Fitness ï¿½ same vertical as the BrightFast BLOCK, different signals)
 
 ### Control Plane layout decision
 
 Phase 3D components are inserted between `AudioOverviewCard` and `ArchitectureStrip`:
 
-1. `ControlPlaneMetrics` (existing — decision distribution bar is unique, kept)
-2. `ExecutiveMetricsDashboard` (new — 4×4 tile grid, leadership KPIs)
+1. `ControlPlaneMetrics` (existing ï¿½ decision distribution bar is unique, kept)
+2. `ExecutiveMetricsDashboard` (new ï¿½ 4ï¿½4 tile grid, leadership KPIs)
 3. `CalibrationPanel` + `PolicyPressurePanel` in a **2-column grid** on `lg:` screens (compact, side-by-side)
-4. `AgentRiskLeaderboard` (new — full width, sortable)
-5. `InsightCards` (existing — 4-card summary row)
-6. `OperationalInsightCards` (new — 3 narrative cards)
+4. `AgentRiskLeaderboard` (new ï¿½ full width, sortable)
+5. `InsightCards` (existing ï¿½ 4-card summary row)
+6. `OperationalInsightCards` (new ï¿½ 3 narrative cards)
 
 The existing `ControlPlaneMetrics` is **retained** because its decision distribution bar (the
 proportional colored strip across all 5 decisions) is visually distinct from the tile grid and
-tells a different story — aggregate decision breakdown vs. individual KPI spotlight.
+tells a different story ï¿½ aggregate decision breakdown vs. individual KPI spotlight.
 
 ### All metrics are deterministic mocks from seed data
 
@@ -1158,7 +1184,7 @@ Every number in Phase 3D is derived from:
 - `SCENARIOS` (6 seed scenarios) evaluated by `evaluateGuardian`
 - `POLICY_RULES` (8 policies in `lib/policies.ts`)
 - `AGENT_REGISTRY` (8 registered agents)
-- `getRuntimeEvents()` (10 seeded events — 6 scenario-mapped + 4 synthetic pending)
+- `getRuntimeEvents()` (10 seeded events ï¿½ 6 scenario-mapped + 4 synthetic pending)
 - `SEED_REVIEW_OUTCOMES` (4 deterministic reviewer outcome records in `lib/executiveMetrics.ts`)
 
 No randomness. No external API calls. No localStorage dependency for metric computation (metrics
@@ -1187,13 +1213,13 @@ are pure functions of seed data, safe for SSR).
 
 ### Guardrails confirmed
 
-- ? `lib/guardianEngine.ts` — unchanged (read-only)
-- ? `lib/policies.ts` — unchanged
+- ? `lib/guardianEngine.ts` ï¿½ unchanged (read-only)
+- ? `lib/policies.ts` ï¿½ unchanged
 - ? Guardian decision immutability preserved
-- ? BYOK — unchanged
+- ? BYOK ï¿½ unchanged
 - ? No external API calls
 - ? Existing deep links preserved (`case`, `event`, `scenario`, `policy`, `agent` params)
-- ? Audio Overview, Executive Demo, BYOK popover, Reset Demo State, Copy Link — all still work
+- ? Audio Overview, Executive Demo, BYOK popover, Reset Demo State, Copy Link ï¿½ all still work
 - ? localStorage persistence, SSR-safe (all new metric functions are pure, server-renderable)
-- ? Enterprise charcoal/amber theme — no neon
+- ? Enterprise charcoal/amber theme ï¿½ no neon
 - ? Phases 3A + 3B + 3C features unmodified
