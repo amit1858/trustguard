@@ -9,6 +9,11 @@ import { parseDeepLink, syncDeepLink, type DeepLinkState } from "@/lib/deepLinks
 import { SCENARIOS, getScenario } from "@/lib/scenarios";
 import { runOrchestrator } from "@/lib/orchestratorEngine";
 import { evaluateGuardian } from "@/lib/guardianEngine";
+import {
+  friendlyErrorMessage,
+  type AIRouteResponse,
+  type ProviderErrorType,
+} from "@/lib/modelProviders";
 
 import Header from "@/components/Header";
 import AppShell, { type ViewId } from "@/components/AppShell";
@@ -69,6 +74,8 @@ function App() {
   const [walkthroughOpen, setWalkthroughOpen] = useState(false);
   const [executiveOpen, setExecutiveOpen] = useState(false);
   const [aiError, setAiError] = useState<string | undefined>();
+  const [aiErrorType, setAiErrorType] = useState<ProviderErrorType | undefined>();
+  const [aiTechnicalDetail, setAiTechnicalDetail] = useState<string | undefined>();
   const [aiLoading, setAiLoading] = useState(false);
   const [aiConnected, setAiConnected] = useState(false);
   const [initialCaseId, setInitialCaseId] = useState<string | null>(null);
@@ -129,13 +136,20 @@ function App() {
     setView(meta.focusView);
   }, [meta.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const byokStatus: ByokStatus =
-    byok.mode === "demo" ? "demo" : aiError ? "error" : aiConnected ? "connected" : "demo";
+  const byokStatus: ByokStatus = useMemo(() => {
+    if (byok.mode === "demo") return { kind: "demo" };
+    if (aiLoading) return { kind: "testing" };
+    if (aiErrorType) return { kind: "error", errorType: aiErrorType };
+    if (aiConnected) return { kind: "connected" };
+    return { kind: "ready" };
+  }, [byok.mode, aiLoading, aiErrorType, aiConnected]);
 
   async function testByok() {
     if (byok.mode !== "byok" || !byok.apiKey) return;
     setAiLoading(true);
     setAiError(undefined);
+    setAiErrorType(undefined);
+    setAiTechnicalDetail(undefined);
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
@@ -145,15 +159,27 @@ function App() {
           apiKey: byok.apiKey,
           modelName: byok.modelName,
           task: "guardian_explanation",
-          prompt: "Test connection. Reply with 'ok'.",
+          prompt:
+            "Summarize in one sentence why Guardian decisions remain governed by deterministic policy rules.",
+          azureEndpoint: byok.azureEndpoint,
+          azureDeployment: byok.azureDeployment,
+          azureApiVersion: byok.azureApiVersion,
         }),
       });
-      const j = await res.json();
-      if (!res.ok || j.ok === false) throw new Error(j.error || "AI request failed");
-      setAiConnected(true);
+      const j = (await res.json()) as AIRouteResponse & { technicalDetail?: string };
+      if (j.ok === false) {
+        setAiConnected(false);
+        setAiErrorType(j.errorType ?? "unknown_error");
+        setAiError(j.message ?? friendlyErrorMessage(j.errorType ?? "unknown_error", byok.provider));
+        setAiTechnicalDetail(j.technicalDetail);
+      } else {
+        setAiConnected(true);
+      }
     } catch (e) {
       setAiConnected(false);
-      setAiError(e instanceof Error ? e.message : "AI request failed");
+      setAiErrorType("network_error");
+      setAiError(friendlyErrorMessage("network_error", byok.provider));
+      setAiTechnicalDetail(e instanceof Error ? e.message : undefined);
     } finally {
       setAiLoading(false);
     }
@@ -197,6 +223,7 @@ function App() {
                 setByok={setByok}
                 status={byokStatus}
                 errorMessage={aiError}
+                technicalDetail={aiTechnicalDetail}
                 onTest={testByok}
                 testing={aiLoading}
               />
@@ -240,6 +267,7 @@ function App() {
             setByok={setByok}
             status={byokStatus}
             errorMessage={aiError}
+            technicalDetail={aiTechnicalDetail}
             onTest={testByok}
             testing={aiLoading}
           />

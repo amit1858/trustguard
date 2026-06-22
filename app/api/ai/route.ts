@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { callModel } from "@/lib/aiClient";
+import { callModel, ProviderError } from "@/lib/aiClient";
 import { SYSTEM_PROMPT } from "@/lib/promptTemplates";
 import type { AIProvider } from "@/lib/types";
+import {
+  friendlyErrorMessage,
+  type AIRouteResponse,
+  type ProviderErrorType,
+} from "@/lib/modelProviders";
 
 export const runtime = "nodejs";
 
@@ -21,14 +26,29 @@ export async function POST(req: NextRequest) {
   try {
     body = (await req.json()) as AIRequestBody;
   } catch {
-    return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+    return jsonError(
+      { provider: "openai" as AIProvider, model: "", task: "" },
+      "malformed_request",
+      "Invalid JSON in request body.",
+      400,
+    );
   }
 
   const { provider, apiKey, modelName, task, prompt } = body || ({} as AIRequestBody);
-  if (!provider || !apiKey || !modelName || !task || !prompt) {
-    return NextResponse.json(
-      { ok: false, error: "Missing required fields: provider, apiKey, modelName, task, prompt" },
-      { status: 400 },
+
+  // Required fields. API key is required for any BYOK call by definition.
+  const missing: string[] = [];
+  if (!provider) missing.push("provider");
+  if (!apiKey) missing.push("apiKey");
+  if (!modelName && !body.azureDeployment) missing.push("modelName");
+  if (!task) missing.push("task");
+  if (!prompt) missing.push("prompt");
+  if (missing.length) {
+    return jsonError(
+      { provider: provider ?? ("openai" as AIProvider), model: modelName ?? "", task: task ?? "" },
+      "malformed_request",
+      `Missing required fields: ${missing.join(", ")}`,
+      400,
     );
   }
 
@@ -43,27 +63,69 @@ export async function POST(req: NextRequest) {
       azureDeployment: body.azureDeployment,
       azureApiVersion: body.azureApiVersion,
     });
-    // Never echo the API key back. Never log it.
-    return NextResponse.json({ ok: true, task, text });
+    const payload: AIRouteResponse = {
+      ok: true,
+      provider,
+      model: modelName,
+      task,
+      text,
+      fallbackUsed: false,
+    };
+    return NextResponse.json(payload);
   } catch (err) {
-    const raw = err instanceof Error ? err.message : "Unknown error";
-    const safe = scrubKey(raw, apiKey);
-    // Log to server console without the key
-    console.warn(`[trustguard/ai] provider=${provider} task=${task} failed: ${safe}`);
-    return NextResponse.json(
-      {
-        ok: false,
-        task,
-        error: safe,
-        fallback:
-          "AI provider call failed. Guardian continues using the deterministic policy kernel.",
-      },
-      { status: 502 },
+    let errorType: ProviderErrorType = "unknown_error";
+    let rawDetail: string | undefined;
+    if (err instanceof ProviderError) {
+      errorType = err.errorType;
+      rawDetail = err.rawDetail;
+    } else if (err instanceof Error) {
+      rawDetail = err.message;
+    }
+
+    // Scrub key from any technical detail surfaced to client / server logs.
+    const safeDetail = scrubKey(rawDetail ?? "", apiKey);
+    const friendly = friendlyErrorMessage(errorType, provider);
+    // Server-side log: never include the key. Truncate body to avoid log spam.
+    console.warn(
+      `[trustguard/ai] provider=${provider} model=${modelName} task=${task} ` +
+        `errorType=${errorType} detail=${safeDetail.slice(0, 200)}`,
     );
+
+    const payload: AIRouteResponse & { technicalDetail?: string } = {
+      ok: false,
+      provider,
+      model: modelName,
+      task,
+      errorType,
+      message: friendly,
+      fallbackUsed: true,
+      technicalDetail: safeDetail || undefined,
+    };
+    // HTTP 200 so the client treats this as a normal (non-fatal) response;
+    // the body carries the structured error. This keeps the demo unscary.
+    return NextResponse.json(payload, { status: 200 });
   }
 }
 
-function scrubKey(s: string, key: string) {
+function jsonError(
+  ctx: { provider: AIProvider; model: string; task: string },
+  errorType: ProviderErrorType,
+  message: string,
+  status: number,
+) {
+  const payload: AIRouteResponse = {
+    ok: false,
+    provider: ctx.provider,
+    model: ctx.model,
+    task: ctx.task,
+    errorType,
+    message,
+    fallbackUsed: true,
+  };
+  return NextResponse.json(payload, { status });
+}
+
+function scrubKey(s: string, key: string): string {
   if (!key) return s;
   return s.split(key).join("[REDACTED]");
 }

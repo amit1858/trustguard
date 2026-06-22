@@ -107,6 +107,10 @@ export interface BYOKConfig {
   provider: AIProvider;
   apiKey: string;
   modelName: string;
+  // Azure OpenAI-specific fields. Held only in-tab; never persisted/logged.
+  azureEndpoint?: string;
+  azureDeployment?: string;
+  azureApiVersion?: string;
   tasks: {
     workerFindings: boolean;
     guardianExplanation: boolean;

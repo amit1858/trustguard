@@ -8,6 +8,7 @@ export default function BYOKSettingsView({
   setByok,
   status,
   errorMessage,
+  technicalDetail,
   onTest,
   testing,
 }: {
@@ -15,6 +16,7 @@ export default function BYOKSettingsView({
   setByok: (b: BYOKConfig) => void;
   status: ByokStatus;
   errorMessage?: string;
+  technicalDetail?: string;
   onTest: () => void;
   testing: boolean;
 }) {
@@ -35,6 +37,7 @@ export default function BYOKSettingsView({
           setByok={setByok}
           status={status}
           errorMessage={errorMessage}
+          technicalDetail={technicalDetail}
           onTest={onTest}
           testing={testing}
         />

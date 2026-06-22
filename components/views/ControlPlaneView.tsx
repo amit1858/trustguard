@@ -97,14 +97,23 @@ export default function ControlPlaneView({
             modelName: byok.modelName,
             task: "guardian_explanation",
             prompt,
+            azureEndpoint: byok.azureEndpoint,
+            azureDeployment: byok.azureDeployment,
+            azureApiVersion: byok.azureApiVersion,
           }),
         });
         const j = await res.json();
-        if (!res.ok || j.ok === false) throw new Error(j.error || "AI request failed");
+        if (j.ok === false) {
+          if (!cancelled) {
+            setAiError(j.message || "AI explanation unavailable.");
+            setAiExplanation(undefined);
+          }
+          return;
+        }
         if (!cancelled) setAiExplanation(j.text);
       } catch (e) {
         if (!cancelled) {
-          setAiError(e instanceof Error ? e.message : "AI request failed");
+          setAiError(e instanceof Error ? e.message : "AI explanation unavailable.");
           setAiExplanation(undefined);
         }
       } finally {
@@ -116,7 +125,7 @@ export default function ControlPlaneView({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scenarioId, byok.mode, byok.apiKey, byok.provider, byok.modelName]);
+  }, [scenarioId, byok.mode, byok.apiKey, byok.provider, byok.modelName, byok.azureEndpoint, byok.azureDeployment]);
 
   return (
     <div className="flex flex-col gap-6">

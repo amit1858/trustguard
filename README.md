@@ -195,18 +195,40 @@ Supported providers:
 ### Module layout
 
 ```
-lib/modelProviders.ts   # provider metadata (id, label, default model)
+lib/modelProviders.ts   # provider registry (presets, defaults, error helpers)
 lib/promptTemplates.ts  # SYSTEM_PROMPT + buildPrompt(task, scenario, guardian)
-lib/aiClient.ts         # provider adapters (OpenAI / Azure / Anthropic / Mistral / OpenRouter)
-app/api/ai/route.ts     # POST /api/ai → { ok, task, text } | { ok:false, error, fallback }
+lib/aiClient.ts         # provider adapters with normalized ProviderError classification
+app/api/ai/route.ts     # POST /api/ai → AIRouteResponse common shape
 ```
 
-The API route accepts `{ provider, apiKey, modelName, task, prompt, ... }` and:
+The API route accepts `{ provider, apiKey, modelName, task, prompt, azureEndpoint?, azureDeployment?, azureApiVersion? }` and returns a normalized `AIRouteResponse`:
+
+```ts
+{ ok, provider, model, task, text?, errorType?, message?, technicalDetail?, fallbackUsed }
+```
 
 - **never persists** the API key
 - **never logs** the API key (server-side errors are scrubbed of the key string)
 - **never echoes** the API key back to the client
-- on failure, returns `{ ok: false, error, fallback }` so the UI gracefully falls back to deterministic mode
+- returns HTTP 200 even on provider failure so the popover stays usable
+- on failure sets `ok:false, fallbackUsed:true` and a friendly `message`; UI keeps the deterministic explanation visible
+
+### BYOK Provider Reliability
+
+BYOK is optional. The app works fully without API keys — deterministic Guardian decisions render the same explanation copy in either mode.
+
+Reliability guarantees:
+
+- **App works with no key.** Demo mode is the default.
+- **Keys are never stored** in `localStorage`, JSON exports, or server logs.
+- **Keys are never echoed** to the client after submission.
+- **BYOK output is explanation-only.** The deterministic policy kernel remains the source of truth for Guardian decision, risk score, allowed/blocked actions, matched policies, and human-review requirement.
+- **Model IDs drift over time** as providers retire aliases. Each provider has a small preset list of currently-valid IDs, but the UI **always allows a custom model ID** so the user can paste any model their account has access to.
+- **Azure OpenAI** is treated as deployment-based: enter your resource endpoint, deployment name, and (optionally) API version. The deployment name is not the same as the underlying model name.
+- **Anthropic** uses dated stable model IDs (e.g. `claude-3-5-haiku-20241022`) rather than `-latest` aliases, which Anthropic rotates and which can return 404 once retired. If a preset ever fails on your account, paste a model ID from [Anthropic's docs](https://docs.anthropic.com/en/docs/about-claude/models) into the custom model field.
+- **Normalized error types** — `model_not_found`, `invalid_api_key`, `rate_limited`, `provider_unavailable`, `malformed_request`, `network_error`, `unknown_error` — drive friendly status pills like "Model Not Found · Falling Back" instead of raw provider stack traces. Raw details are collapsed under "Technical details".
+
+If BYOK fails for any reason, the page does not crash and the Guardian decision does not change.
 
 ### Deterministic policy kernel
 

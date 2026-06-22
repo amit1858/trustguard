@@ -1,17 +1,29 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PROVIDERS } from "@/lib/modelProviders";
+import { PROVIDERS, findProvider, type ProviderErrorType } from "@/lib/modelProviders";
 import type { AIProvider, BYOKConfig } from "@/lib/types";
 
-export type ByokStatus = "demo" | "connected" | "error";
+/**
+ * Rich status used by the BYOK pill + popover.
+ * Constructed in app/page.tsx based on the normalized AI route response.
+ */
+export type ByokStatus =
+  | { kind: "demo" }
+  | { kind: "ready" }
+  | { kind: "testing" }
+  | { kind: "connected" }
+  | { kind: "error"; errorType: ProviderErrorType };
+
+const CUSTOM_PRESET_ID = "__custom__";
 
 export default function BYOKControl({
   byok,
   setByok,
   status,
   errorMessage,
+  technicalDetail,
   onTest,
   testing,
 }: {
@@ -19,23 +31,24 @@ export default function BYOKControl({
   setByok: (b: BYOKConfig) => void;
   status: ByokStatus;
   errorMessage?: string;
+  technicalDetail?: string;
   onTest: () => void;
   testing: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; width: number }>({
     top: 0,
     left: 0,
-    width: 460,
+    width: 480,
   });
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- mount flag for portal SSR-safety
   useEffect(() => setMounted(true), []);
 
-  // Compute viewport-safe popover position whenever it opens or window resizes/scrolls.
   useLayoutEffect(() => {
     if (!open) return;
     function place() {
@@ -44,13 +57,12 @@ export default function BYOKControl({
       const r = trig.getBoundingClientRect();
       const vw = window.innerWidth;
       const vh = window.innerHeight;
-      const width = Math.min(460, vw - 24);
-      let left = r.right - width; // right-aligned to trigger
+      const width = Math.min(480, vw - 24);
+      let left = r.right - width;
       if (left < 12) left = 12;
       if (left + width > vw - 12) left = Math.max(12, vw - width - 12);
       let top = r.bottom + 8;
-      // If not enough room below, flip above
-      const estimatedHeight = Math.min(640, vh - 48);
+      const estimatedHeight = Math.min(680, vh - 48);
       if (top + estimatedHeight > vh - 12) {
         const aboveTop = r.top - 8 - estimatedHeight;
         if (aboveTop >= 12) top = aboveTop;
@@ -67,7 +79,6 @@ export default function BYOKControl({
     };
   }, [open]);
 
-  // Outside click + Escape
   useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
@@ -86,6 +97,12 @@ export default function BYOKControl({
       document.removeEventListener("keydown", onKey);
     };
   }, [open]);
+
+  const provider = findProvider(byok.provider);
+  const presets = provider?.presets ?? [];
+  const isAzure = byok.provider === "azure_openai";
+  const matchedPreset = presets.find((p) => p.id === byok.modelName);
+  const presetValue = matchedPreset?.id ?? CUSTOM_PRESET_ID;
 
   const pill = statusPill(status);
 
@@ -106,7 +123,7 @@ export default function BYOKControl({
       >
         <span>⚙️ BYOK</span>
         <span
-          className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full"
+          className="text-[10px] uppercase tracking-widest px-2 py-0.5 rounded-full whitespace-nowrap"
           style={{ background: pill.bg, color: pill.fg, border: `1px solid ${pill.border}` }}
         >
           {pill.label}
@@ -158,37 +175,135 @@ export default function BYOKControl({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Provider">
+              <Field label="Provider" className="col-span-2">
                 <select
                   disabled={byok.mode === "demo"}
                   value={byok.provider}
                   onChange={(e) => {
-                    const provider = e.target.value as AIProvider;
-                    const p = PROVIDERS.find((x) => x.id === provider);
+                    const newProvider = e.target.value as AIProvider;
+                    const meta = findProvider(newProvider);
                     setByok({
                       ...byok,
-                      provider,
-                      modelName: p?.defaultModel || byok.modelName,
+                      provider: newProvider,
+                      modelName: meta?.defaultPresetId || "",
+                      // Reset Azure fields when switching away from Azure.
+                      azureEndpoint:
+                        newProvider === "azure_openai" ? byok.azureEndpoint : undefined,
+                      azureDeployment:
+                        newProvider === "azure_openai" ? byok.azureDeployment : undefined,
+                      azureApiVersion:
+                        newProvider === "azure_openai" ? byok.azureApiVersion : undefined,
                     });
                   }}
                   className="input"
                 >
                   {PROVIDERS.map((p) => (
                     <option key={p.id} value={p.id}>
-                      {p.label}
+                      {p.displayName}
                     </option>
                   ))}
                 </select>
+                {provider && (
+                  <div className="text-[11px] text-[var(--ink-2)] mt-1 leading-snug">
+                    {provider.helperText}{" "}
+                    <a
+                      href={provider.docsUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline opacity-80 hover:opacity-100"
+                    >
+                      Docs ↗
+                    </a>
+                  </div>
+                )}
               </Field>
-              <Field label="Model">
-                <input
-                  disabled={byok.mode === "demo"}
-                  value={byok.modelName}
-                  onChange={(e) => setByok({ ...byok, modelName: e.target.value })}
-                  className="input"
-                  placeholder="model name"
-                />
-              </Field>
+
+              {/* Non-Azure providers: preset dropdown + custom model field */}
+              {!isAzure && (
+                <>
+                  <Field label="Model preset">
+                    <select
+                      disabled={byok.mode === "demo"}
+                      value={presetValue}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        if (v === CUSTOM_PRESET_ID) {
+                          // Switching to custom — clear so user types.
+                          setByok({ ...byok, modelName: "" });
+                        } else {
+                          setByok({ ...byok, modelName: v });
+                        }
+                      }}
+                      className="input"
+                    >
+                      {presets.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.label}
+                          {p.hint ? ` — ${p.hint}` : ""}
+                        </option>
+                      ))}
+                      <option value={CUSTOM_PRESET_ID}>Custom…</option>
+                    </select>
+                  </Field>
+                  <Field label="Custom model ID">
+                    <input
+                      disabled={byok.mode === "demo"}
+                      value={byok.modelName}
+                      onChange={(e) => setByok({ ...byok, modelName: e.target.value })}
+                      className="input"
+                      placeholder="enter model id available in your account"
+                      spellCheck={false}
+                    />
+                  </Field>
+                </>
+              )}
+
+              {/* Azure-specific fields */}
+              {isAzure && (
+                <>
+                  <Field label="Azure endpoint" className="col-span-2">
+                    <input
+                      disabled={byok.mode === "demo"}
+                      value={byok.azureEndpoint ?? ""}
+                      onChange={(e) =>
+                        setByok({ ...byok, azureEndpoint: e.target.value })
+                      }
+                      className="input"
+                      placeholder="https://<resource>.openai.azure.com"
+                      spellCheck={false}
+                    />
+                  </Field>
+                  <Field label="Deployment name">
+                    <input
+                      disabled={byok.mode === "demo"}
+                      value={byok.azureDeployment ?? byok.modelName ?? ""}
+                      onChange={(e) =>
+                        setByok({
+                          ...byok,
+                          azureDeployment: e.target.value,
+                          modelName: e.target.value,
+                        })
+                      }
+                      className="input"
+                      placeholder="your deployment name (not raw model name)"
+                      spellCheck={false}
+                    />
+                  </Field>
+                  <Field label="API version">
+                    <input
+                      disabled={byok.mode === "demo"}
+                      value={byok.azureApiVersion ?? "2024-08-01-preview"}
+                      onChange={(e) =>
+                        setByok({ ...byok, azureApiVersion: e.target.value })
+                      }
+                      className="input"
+                      placeholder="2024-08-01-preview"
+                      spellCheck={false}
+                    />
+                  </Field>
+                </>
+              )}
+
               <Field label="API Key" className="col-span-2">
                 <input
                   disabled={byok.mode === "demo"}
@@ -196,7 +311,9 @@ export default function BYOKControl({
                   onChange={(e) => setByok({ ...byok, apiKey: e.target.value })}
                   className="input"
                   type="password"
-                  placeholder="sk-…   (held only in this browser tab, never persisted)"
+                  placeholder="held only in this browser tab · never persisted or logged"
+                  spellCheck={false}
+                  autoComplete="off"
                 />
               </Field>
             </div>
@@ -238,7 +355,7 @@ export default function BYOKControl({
 
             <button
               onClick={onTest}
-              disabled={byok.mode !== "byok" || !byok.apiKey || testing}
+              disabled={byok.mode !== "byok" || !byok.apiKey || !byok.modelName || testing}
               className="mt-4 w-full py-2 rounded-lg text-sm font-medium border transition disabled:opacity-40"
               style={{
                 borderColor: "rgba(245, 158, 46, 0.5)",
@@ -251,9 +368,48 @@ export default function BYOKControl({
                 ? "Calling provider…"
                 : "Test connection & generate AI explanation"}
             </button>
-            {errorMessage && (
-              <div className="text-xs mt-2" style={{ color: "#D97448" }}>
-                ⚠ {errorMessage} — falling back to deterministic mode.
+
+            {/* Friendly error / success surface */}
+            {status.kind === "error" && errorMessage && (
+              <div
+                className="mt-2 p-3 rounded-lg border text-xs leading-relaxed"
+                style={{
+                  borderColor: "rgba(217, 116, 72, 0.45)",
+                  background: "rgba(217, 116, 72, 0.07)",
+                  color: "#F4EFE7",
+                }}
+              >
+                <div style={{ color: "#FFB454" }}>⚠ {errorMessage}</div>
+                <div className="text-[var(--ink-2)] mt-1">
+                  Guardian decisions continue to use the deterministic policy kernel.
+                </div>
+                {technicalDetail && (
+                  <details
+                    className="mt-2"
+                    open={showDetail}
+                    onToggle={(e) => setShowDetail((e.target as HTMLDetailsElement).open)}
+                  >
+                    <summary className="cursor-pointer text-[var(--ink-2)] select-none">
+                      Technical details
+                    </summary>
+                    <pre className="mt-1 whitespace-pre-wrap break-words text-[10px] text-[var(--ink-2)] max-h-32 overflow-y-auto">
+                      {technicalDetail}
+                    </pre>
+                  </details>
+                )}
+              </div>
+            )}
+            {status.kind === "connected" && (
+              <div
+                className="mt-2 p-3 rounded-lg border text-xs"
+                style={{
+                  borderColor: "rgba(111, 176, 137, 0.45)",
+                  background: "rgba(111, 176, 137, 0.07)",
+                  color: "#86efac",
+                }}
+              >
+                ✓ BYOK Connected. AI-assisted explanation will appear alongside the
+                deterministic explanation.
               </div>
             )}
 
@@ -279,26 +435,59 @@ export default function BYOKControl({
 }
 
 function statusPill(status: ByokStatus) {
-  if (status === "connected")
+  if (status.kind === "connected") {
     return {
       label: "BYOK Connected",
       fg: "#86efac",
       bg: "rgba(111,176,137,0.14)",
       border: "rgba(111,176,137,0.55)",
     };
-  if (status === "error")
+  }
+  if (status.kind === "testing") {
     return {
-      label: "BYOK Error · falling back to Deterministic",
-      fg: "#FFB454",
-      bg: "rgba(217,116,72,0.14)",
-      border: "rgba(217,116,72,0.55)",
+      label: "Testing Connection",
+      fg: "#F4EFE7",
+      bg: "rgba(245, 158, 46, 0.18)",
+      border: "rgba(245, 158, 46, 0.55)",
     };
+  }
+  if (status.kind === "ready") {
+    return {
+      label: "BYOK Ready",
+      fg: "#F4EFE7",
+      bg: "rgba(155, 137, 184, 0.16)",
+      border: "rgba(155, 137, 184, 0.55)",
+    };
+  }
+  if (status.kind === "error") {
+    return { label: errorPillLabel(status.errorType), fg: "#FFB454", bg: "rgba(217,116,72,0.14)", border: "rgba(217,116,72,0.55)" };
+  }
   return {
     label: "Demo Mode Active",
     fg: "#F4EFE7",
     bg: "rgba(245, 158, 46, 0.12)",
     border: "rgba(245, 158, 46, 0.50)",
   };
+}
+
+function errorPillLabel(t: ProviderErrorType): string {
+  switch (t) {
+    case "model_not_found":
+      return "Model Not Found · Falling Back";
+    case "invalid_api_key":
+      return "Invalid API Key · Falling Back";
+    case "rate_limited":
+      return "Rate Limited · Falling Back";
+    case "provider_unavailable":
+      return "Provider Error · Falling Back";
+    case "network_error":
+      return "Network Error · Falling Back";
+    case "malformed_request":
+      return "Bad Request · Falling Back";
+    case "unknown_error":
+    default:
+      return "BYOK Error · Falling Back";
+  }
 }
 
 function Field({
@@ -364,8 +553,11 @@ function TaskCheck({
   disabled?: boolean;
   onChange: (v: boolean) => void;
 }) {
+  // useMemo to silence "unused import" if React tree-shaking changes; harmless otherwise.
+  const id = useMemo(() => `tc-${label.replace(/\s+/g, "-").toLowerCase()}`, [label]);
   return (
     <label
+      htmlFor={id}
       className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border ${
         disabled ? "opacity-40" : ""
       }`}
@@ -375,6 +567,7 @@ function TaskCheck({
       }}
     >
       <input
+        id={id}
         type="checkbox"
         disabled={disabled}
         checked={checked}
